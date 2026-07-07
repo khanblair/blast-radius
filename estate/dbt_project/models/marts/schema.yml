@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: "Customer dimension. `customer_key` is derived from stg_customers.cust_id."
+    columns:
+      - name: customer_key
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_orders
+    description: "Order fact table, one row per order."
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: customer_key
+        tests:
+          - not_null
+
+  - name: fct_revenue
+    description: "Revenue aggregated per customer. Built via `select *` from an internal CTE -- deliberately fragile to upstream shape changes (the SILENT_CORRUPTION showcase)."
+    columns:
+      - name: customer_key
+        tests:
+          - unique
+          - not_null

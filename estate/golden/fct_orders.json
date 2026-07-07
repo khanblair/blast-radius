@@ -1,0 +1,12 @@
+{
+  "table": "fct_orders",
+  "row_count": 800,
+  "columns": [
+    "order_id",
+    "customer_key",
+    "order_date",
+    "status",
+    "amount"
+  ],
+  "checksum": "1c26d775096ea4cdf46c836b478c7488640f157670e2b893472d5fa211a7d4bd"
+}

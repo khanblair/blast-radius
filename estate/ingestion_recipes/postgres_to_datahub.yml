@@ -1,0 +1,29 @@
+# Ingests the raw warehouse layer (raw_customers, raw_orders, raw_payments)
+# into DataHub. `env`/`convert_urns_to_lowercase` must match
+# dbt_to_datahub.yml exactly: the dbt source resolves its ref()/source()
+# dependencies to this platform's URNs (bridging postgres <-> dbt entities
+# via upstreamLineage, not a Siblings merge -- see feedback-notes.md).
+source:
+  type: postgres
+  config:
+    host_port: "localhost:${PG_PORT}"
+    database: "${PG_DATABASE}"
+    username: "${PG_USER}"
+    password: "${PG_PASSWORD}"
+
+    env: "PROD"
+    convert_urns_to_lowercase: false
+
+    schema_pattern:
+      allow:
+        - "^public$"
+
+    include_tables: true
+    include_views: true
+    include_view_lineage: true
+    include_view_column_lineage: true
+
+sink:
+  type: "datahub-rest"
+  config:
+    server: "${DATAHUB_GMS_URL}"

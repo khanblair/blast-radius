@@ -1,0 +1,12 @@
+{
+  "table": "fct_revenue",
+  "row_count": 252,
+  "columns": [
+    "customer_key",
+    "first_name",
+    "last_name",
+    "order_count",
+    "total_amount"
+  ],
+  "checksum": "1d429aa687cbaf82dc83fb9347a232d6e3bbaafe81f4aee8590e58df422cff60"
+}

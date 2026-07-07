@@ -1,0 +1,20 @@
+services:
+  warehouse:
+    image: postgres:16
+    container_name: blast_radius_warehouse
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres_user}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres_password}
+      POSTGRES_DB: ${PG_DATABASE:-warehouse}
+    ports:
+      - "${PG_PORT:-5433}:5432"
+    volumes:
+      - warehouse_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres_user} -d ${PG_DATABASE:-warehouse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  warehouse_data:

@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: raw
+    database: "{{ env_var('PG_DATABASE', 'warehouse') }}"
+    schema: public
+    tables:
+      - name: raw_customers
+      - name: raw_orders
+      - name: raw_payments

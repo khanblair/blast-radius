@@ -1,0 +1,15 @@
+anthropic
+openai
+google-genai
+sqlglot
+pygithub
+dbt-core
+dbt-postgres
+pyyaml
+python-dotenv
+rich
+faker
+acryl-datahub[postgres,dbt]==1.6.0.10
+requests
+psycopg2-binary
+pytest

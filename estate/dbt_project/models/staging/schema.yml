@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: "Cleaned customer records from the raw warehouse layer."
+    columns:
+      - name: cust_id
+        description: "Primary key from the raw customers table. Renaming this column is the canonical Blast Radius demo change."
+        tests:
+          - unique
+          - not_null
+      - name: email
+        tests:
+          - not_null
+
+  - name: stg_orders
+    description: "Cleaned order records from the raw warehouse layer."
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: cust_id
+        tests:
+          - not_null
+
+  - name: stg_payments
+    description: "Cleaned payment records from the raw warehouse layer."
+    columns:
+      - name: payment_id
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        tests:
+          - not_null

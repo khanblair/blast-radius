@@ -1,0 +1,19 @@
+name: 'blast_radius_estate'
+version: '1.0.0'
+config-version: 2
+
+profile: 'blast_radius_estate'
+
+model-paths: ["models"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  blast_radius_estate:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

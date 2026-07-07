@@ -1,0 +1,18 @@
+.env
+.venv/
+.claude/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# dbt
+estate/dbt_project/target/
+estate/dbt_project/dbt_packages/
+estate/dbt_project/logs/
+estate/dbt_project/.user.yml
+
+# generated seed data (reproducible via generate_seed_data.py)
+estate/seeds/data/*.csv
+
+traces/*.jsonl
