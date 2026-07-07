@@ -56,17 +56,17 @@ GLOSSARY_TERMS = {
 }
 
 SAMPLE_QUERIES = [
-    "SELECT customer_key, total_amount FROM fct_revenue ORDER BY total_amount DESC LIMIT 10",
-    "SELECT customer_key, order_count FROM fct_revenue WHERE order_count > 5",
+    "SELECT customer_key, amount FROM fct_revenue ORDER BY amount DESC LIMIT 10",
+    "SELECT customer_key, COUNT(*) FROM fct_revenue GROUP BY customer_key HAVING COUNT(*) > 5",
     "SELECT * FROM fct_orders WHERE status = 'completed'",
-    "SELECT customer_key, SUM(total_amount) FROM fct_revenue GROUP BY customer_key",
+    "SELECT customer_key, SUM(amount) FROM fct_revenue GROUP BY customer_key",
     "SELECT o.order_id, o.amount FROM fct_orders o WHERE o.order_date > now() - interval '30 days'",
     "SELECT COUNT(*) FROM fct_orders WHERE status = 'cancelled'",
     "SELECT customer_key, first_name, last_name FROM dim_customers",
-    "SELECT AVG(total_amount) FROM fct_revenue",
-    "SELECT customer_key FROM fct_revenue WHERE order_count = 1",
+    "SELECT AVG(amount) FROM fct_revenue",
+    "SELECT customer_key FROM fct_revenue WHERE order_id = (SELECT MIN(order_id) FROM fct_revenue)",
     "SELECT order_id, customer_key, amount FROM fct_orders WHERE amount > 400",
-    "SELECT customer_key, total_amount FROM fct_revenue WHERE total_amount > (SELECT AVG(total_amount) FROM fct_revenue)",
+    "SELECT customer_key, amount FROM fct_revenue WHERE amount > (SELECT AVG(amount) FROM fct_revenue)",
     "SELECT status, COUNT(*) FROM fct_orders GROUP BY status",
 ]
 
@@ -112,7 +112,7 @@ def build_glossary_association_mcps() -> list[MetadataChangeProposalWrapper]:
         terms=[GlossaryTermAssociationClass(urn=make_term_urn("NetRevenue"))],
         auditStamp=audit_stamp,
     )
-    field_urn = make_schema_field_urn(dataset_urn("fct_revenue"), "total_amount")
+    field_urn = make_schema_field_urn(dataset_urn("fct_revenue"), "amount")
     mcps.append(MetadataChangeProposalWrapper(entityUrn=field_urn, aspect=net_revenue_terms))
 
     return mcps
@@ -121,7 +121,7 @@ def build_glossary_association_mcps() -> list[MetadataChangeProposalWrapper]:
 def build_description_mcps() -> list[MetadataChangeProposalWrapper]:
     descriptions = {
         "raw_customers": "Raw customer records loaded from the source system. Primary key is `cust_id`.",
-        "fct_revenue": "Revenue aggregated per customer. Exposed via `SELECT *` -- its shape depends entirely on upstream marts.",
+        "fct_revenue": "Order-level revenue joined with the full customer dimension via `SELECT *` -- its shape depends entirely on dim_customers.",
     }
     mcps = []
     for table, description in descriptions.items():

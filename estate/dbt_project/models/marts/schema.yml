@@ -21,9 +21,12 @@ models:
           - not_null
 
   - name: fct_revenue
-    description: "Revenue aggregated per customer. Built via `select *` from an internal CTE -- deliberately fragile to upstream shape changes (the SILENT_CORRUPTION showcase)."
+    description: "Order-level revenue enriched with the full customer dimension via `select *` -- deliberately fragile to upstream shape changes on dim_customers (the SILENT_CORRUPTION showcase)."
     columns:
-      - name: customer_key
+      - name: order_id
         tests:
           - unique
+          - not_null
+      - name: customer_key
+        tests:
           - not_null

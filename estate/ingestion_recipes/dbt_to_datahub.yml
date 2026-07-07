@@ -4,16 +4,16 @@
 # entities' upstreamLineage correctly bridges to the raw-Postgres-ingested
 # URNs for the same physical tables (see feedback-notes.md).
 #
-# manifest_path/catalog_path/run_results_paths are absolute paths on this
-# machine -- regenerate them via `dbt build && dbt docs generate` and update
-# the paths if this repo is cloned elsewhere.
+# manifest_path/catalog_path/run_results_paths are driven by DBT_PROJECT_DIR
+# in .env (an absolute path, machine-specific) -- regenerate the artifacts
+# via `dbt build && dbt docs generate` after cloning elsewhere.
 source:
   type: "dbt"
   config:
-    manifest_path: "/Users/kolaborateplatforms/BLAIR/blastradius/estate/dbt_project/target/manifest.json"
-    catalog_path: "/Users/kolaborateplatforms/BLAIR/blastradius/estate/dbt_project/target/catalog.json"
+    manifest_path: "${DBT_PROJECT_DIR}/target/manifest.json"
+    catalog_path: "${DBT_PROJECT_DIR}/target/catalog.json"
     run_results_paths:
-      - "/Users/kolaborateplatforms/BLAIR/blastradius/estate/dbt_project/target/run_results.json"
+      - "${DBT_PROJECT_DIR}/target/run_results.json"
 
     target_platform: "postgres"
     env: "PROD"
