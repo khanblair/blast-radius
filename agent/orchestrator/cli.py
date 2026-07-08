@@ -21,6 +21,15 @@ from agent.orchestrator.mcp_client import datahub_mcp_session
 
 
 async def resolve_dataset_urn(loop: ReasoningLoop, table: str, platform: str) -> str:
+    # Deliberately checks urn.startswith(...) rather than entity.get("type") --
+    # `search` result entities carry no "type"/"name"/"platform" field at all
+    # (only "properties" and "urn"), unlike `get_lineage` result entities,
+    # which do. This is a real per-tool shape inconsistency in
+    # mcp-server-datahub, not an oversight here -- see feedback-notes.md's
+    # "Candidate upstream contributions" section for the drafted upstream
+    # issue and live evidence. agent/assessment/engine.py's `entity.get("type")
+    # == "DATASET"` checks are correct as written because they only ever
+    # operate on get_lineage results, which do carry that field.
     result = await loop.search(table, rationale=f"resolve `{table}` to a dataset URN")
     for r in result.get("searchResults", []):
         urn = r["entity"].get("urn", "")

@@ -20,8 +20,21 @@ DASHBOARD_URN = "urn:li:dashboard:(blast_radius,revenue_dashboard)"
 
 
 def build_pipeline() -> tuple[DataFlow, DataJob]:
+    # DataJob.inlets/.outlets require DatasetUrn objects, not plain strings --
+    # its own docstring says `List[str]` (a real upstream mismatch, see
+    # feedback-notes.md's "Candidate upstream contributions"), but the actual
+    # field type is `List[DatasetUrn]`; plain strings pass silently at
+    # assignment and only fail later, at .emit() time, with an unhelpful
+    # AttributeError. DatasetUrn.from_string(...) here avoids that entirely.
     flow = DataFlow(orchestrator="airflow", id="blast_radius_dbt_pipeline", env="PROD")
     job = DataJob(flow_urn=flow.urn, id="run_dbt_build")
+    # NOTE: every raw table -> every mart table, deliberately coarse (this is
+    # a single synthetic "run the whole dbt build" job, not per-model tasks).
+    # This creates job-level lineage edges broader than dbt's own ref()
+    # graph -- e.g. raw_payments -> fct_revenue via this job, even though no
+    # dbt model actually connects them. This is the confirmed root cause of
+    # the "broad reachability disagrees with the dbt-graph" behavior noted in
+    # feedback-notes.md (originally logged as an open, unconfirmed question).
     job.inlets = [DatasetUrn.from_string(dataset_urn(t)) for t in RAW_TABLES]
     job.outlets = [DatasetUrn.from_string(dataset_urn(t)) for t in MART_TABLES]
     return flow, job

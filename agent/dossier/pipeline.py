@@ -15,6 +15,8 @@ callable instead of requiring five separate manual invocations.
            -> run_self_correction               (Loop 1, Phase 5)
       -> render_dossier                         (Phase 7 Part A)
       -> create_pr(dry_run=not create_pr_live)  (Phase 7 Part B, Loop 4 gate #2)
+      -> [only if write_to_datahub=True]:
+           save_document(...) via MCP           (write-back into DataHub itself)
 
 `run_full_pipeline` is a plain synchronous function returning a plain dict
 (no async, no dataclass) specifically because the task spec says a parallel
@@ -153,6 +155,43 @@ def _run_codegen_and_verification(
     return result, original_content
 
 
+async def _write_dossier_to_datahub(
+    assessment: AssessmentResult,
+    decision: MigrationDecision,
+    table: str,
+    old_column: str,
+    new_column: str,
+    dossier_markdown: str,
+) -> dict:
+    """Write-back (spec's "DataHub documentation on affected assets, via
+    proposals" delivery mode): persists the rendered dossier into DataHub's
+    own knowledge base via the MCP `save_document` mutation tool, tied to
+    every affected asset's URN via `related_assets` so it's visible directly
+    from each of those assets' pages in the DataHub UI, not just from a
+    global document list. This is the one place in the whole pipeline that
+    writes anything back into DataHub itself -- every other write this
+    project makes lands in a local dbt file or a GitHub PR.
+
+    `document_type` is "Decision" for a BREAKING outcome (a real choice was
+    made among named strategies) and "Analysis" otherwise (NO_MIGRATION_NEEDED/
+    ADDITIVE are assessment conclusions, not a decision among alternatives)."""
+    document_type = "Decision" if decision.decision_type == BREAKING else "Analysis"
+    related_assets = [assessment.changed_urn] + [asset.urn for asset in assessment.affected if asset.urn]
+
+    async with datahub_mcp_session() as session:
+        loop = ReasoningLoop(session=session, run_id=f"writeback-{uuid.uuid4().hex[:8]}")
+        result = await loop.save_document(
+            document_type,
+            f"Blast Radius: {table}.{old_column} -> {new_column} migration dossier",
+            dossier_markdown,
+            rationale="persist migration dossier to DataHub for reviewers browsing the affected assets",
+            related_assets=related_assets,
+            topics=["blast-radius", table, decision.decision_type],
+        )
+        loop.write_trace()
+        return result
+
+
 def run_full_pipeline(
     table: str,
     old_column: str,
@@ -162,6 +201,7 @@ def run_full_pipeline(
     platform: str = "postgres",
     auto_approve_decision: bool = False,
     create_pr_live: bool = False,
+    write_to_datahub: bool = False,
     max_hops: int = 3,
     max_tool_calls: int = 30,
     max_attempts: int = 3,
@@ -169,9 +209,20 @@ def run_full_pipeline(
     """Runs the full spec pipeline end to end and returns a summary dict.
 
     `create_pr_live` is forwarded to `create_pr` as `dry_run=not
-    create_pr_live` -- it must always be False in this task (see
-    agent/dossier/pr.py's module docstring for the absolute safety rules
-    around the True path).
+    create_pr_live` -- see agent/dossier/pr.py's module docstring for the
+    absolute safety rules around the True path (never enabled in automated
+    testing; opening a real GitHub PR is a deliberate, human-invoked action).
+
+    `write_to_datahub`, when True, persists the rendered dossier into
+    DataHub's own knowledge base via `save_document` -- unlike `create_pr_live`,
+    this writes only to this project's own local DataHub instance (no
+    external/third-party visibility), but it's still an opt-in, off-by-default
+    action, matching the MCP tool's own "confirm with the user before saving"
+    guidance rather than writing on every run unconditionally. Runs for
+    every decision type (including NO_MIGRATION_NEEDED/ADDITIVE), since
+    "we checked and nothing was needed" is itself worth recording on the
+    asset. Never blocks pipeline completion -- see the try/except around its
+    call below.
 
     NO_MIGRATION_NEEDED and ADDITIVE decisions (and BREAKING decisions with
     no ORIGIN_HARD_BREAK asset carrying a usable dbt_file_path) skip codegen
@@ -201,6 +252,10 @@ def run_full_pipeline(
             None and instead prints a preview -- see agent/dossier/pr.py)
       - "branch_name": str | None -- the branch name passed to create_pr, or
             None iff pr_attempted is False
+      - "datahub_write_attempted": bool -- True iff write_to_datahub was set
+      - "datahub_document_urn": str | None -- the saved document's URN on
+            success; None if write_to_datahub was False, or if the write
+            itself failed (see docstring above -- failures never raise)
     """
     assessment = asyncio.run(
         _resolve_and_assess(table, old_column, schema, platform, max_hops, max_tool_calls)
@@ -246,6 +301,20 @@ def run_full_pipeline(
             original_content=original_content,
         )
 
+    datahub_document_urn = None
+    if write_to_datahub:
+        try:
+            write_result = asyncio.run(
+                _write_dossier_to_datahub(assessment, decision, table, old_column, new_column, dossier_markdown)
+            )
+            if write_result.get("success"):
+                datahub_document_urn = write_result.get("urn")
+        except Exception:
+            # A transient MCP/network failure writing back to DataHub
+            # shouldn't discard an otherwise-complete pipeline run -- the
+            # dossier and PR preview are still valid and returned either way.
+            datahub_document_urn = None
+
     return {
         "assessment": assessment,
         "narrative": narrative,
@@ -257,4 +326,6 @@ def run_full_pipeline(
         "pr_attempted": pr_attempted,
         "pr_result": pr_result,
         "branch_name": branch_name,
+        "datahub_write_attempted": write_to_datahub,
+        "datahub_document_urn": datahub_document_urn,
     }

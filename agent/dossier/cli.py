@@ -2,7 +2,7 @@
 full spec pipeline end to end (agent.dossier.pipeline.run_full_pipeline) and
 prints the resulting dossier, plus a PR preview/result.
 
-    python -m agent.dossier.cli --table raw_customers --old-column cust_id --new-column customer_id [--auto-approve] [--create-pr]
+    python -m agent.dossier.cli --table raw_customers --old-column cust_id --new-column customer_id [--auto-approve] [--create-pr] [--write-to-datahub]
 
 SAFETY: `--create-pr` sets create_pr_live=True, which would attempt a REAL
 GitHub PR via PyGithub against the real khanblair/blast-radius repo. Per
@@ -12,6 +12,14 @@ this tool -- GITHUB_TOKEN is blank in .env (so it would fail anyway), but
 more importantly this repo's live git working copy and the real `khanblair`
 GitHub identity must never be touched by an automated run. Every live
 verification of this CLI uses only the default dry-run path.
+
+`--write-to-datahub` is a different, much lower-risk category of action --
+it writes a Document entity into THIS PROJECT'S OWN local DataHub instance
+(the metadata platform, not any git/GitHub repo), visible from the affected
+datasets' own pages in the DataHub UI. Off by default, matching the
+`save_document` MCP tool's own "confirm with the user before saving"
+guidance -- safe to pass freely against a local dev instance, unlike
+`--create-pr`.
 """
 from __future__ import annotations
 
@@ -50,6 +58,15 @@ def main(argv: list[str] | None = None) -> None:
             "preview. Never pass this during development/testing -- see this module's docstring."
         ),
     )
+    parser.add_argument(
+        "--write-to-datahub",
+        dest="write_to_datahub",
+        action="store_true",
+        help=(
+            "Persist the rendered dossier as a Document in this project's own local DataHub "
+            "instance, linked to every affected asset. Off by default -- see this module's docstring."
+        ),
+    )
     parser.add_argument("--max-hops", dest="max_hops", type=int, default=3)
     parser.add_argument("--max-tool-calls", dest="max_tool_calls", type=int, default=30)
     parser.add_argument("--max-attempts", dest="max_attempts", type=int, default=3)
@@ -65,6 +82,7 @@ def main(argv: list[str] | None = None) -> None:
         platform=args.platform,
         auto_approve_decision=args.auto_approve,
         create_pr_live=args.create_pr,
+        write_to_datahub=args.write_to_datahub,
         max_hops=args.max_hops,
         max_tool_calls=args.max_tool_calls,
         max_attempts=args.max_attempts,
@@ -83,6 +101,13 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print()
             print(f"PR created: {result['pr_result']}")
+
+    if result["datahub_write_attempted"]:
+        print()
+        if result["datahub_document_urn"]:
+            print(f"Dossier saved to DataHub: {result['datahub_document_urn']}")
+        else:
+            print("Dossier write to DataHub was attempted but did not succeed (see traces/ for details).")
 
 
 if __name__ == "__main__":

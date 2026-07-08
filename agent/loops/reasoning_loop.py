@@ -81,6 +81,37 @@ class ReasoningLoop:
             "list_schema_fields", {"urn": urn, "limit": limit}, rationale, lambda d: f"{d.get('totalFields', 0)} fields"
         )
 
+    async def save_document(
+        self,
+        document_type: str,
+        title: str,
+        content: str,
+        rationale: str,
+        related_assets: list[str] | None = None,
+        topics: list[str] | None = None,
+    ) -> dict:
+        """Stage 6 (Deliver) / write-back: persists a document to DataHub's
+        knowledge base via the MCP server's `save_document` mutation tool --
+        the only place in this codebase that writes anything back to
+        DataHub itself (every other write this project makes is either to a
+        local dbt project file or to GitHub). `related_assets` (dataset
+        URNs) makes the document visible from each of those assets' own
+        pages in the DataHub UI, not just from a global document list.
+        `document_type` must be one of the tool's fixed enum values --
+        "Decision" is the natural fit for a rendered migration dossier.
+        The tool's own docstring says a caller should confirm with the user
+        before calling this; callers of this method are expected to gate on
+        an explicit opt-in (e.g. a `--write-to-datahub` flag) rather than
+        call it unconditionally."""
+        args: dict[str, Any] = {"document_type": document_type, "title": title, "content": content}
+        if related_assets:
+            args["related_assets"] = related_assets
+        if topics:
+            args["topics"] = topics
+        return await self._call(
+            "save_document", args, rationale, lambda d: f"success={d.get('success')} urn={d.get('urn')}"
+        )
+
     def write_trace(self) -> Path:
         TRACES_DIR.mkdir(parents=True, exist_ok=True)
         path = TRACES_DIR / f"{self.run_id}.jsonl"
