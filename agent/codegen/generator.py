@@ -1,18 +1,27 @@
-"""Codegen (Phase 5 Part A): template-anchored patch generation for the
-ORIGIN_HARD_BREAK asset (spec's canonical demo scenario -- stg_customers.sql
-reading raw_customers.cust_id, which is renamed to customer_id).
+"""Codegen (Phase 5 Part A): template-anchored patch generation for an
+ORIGIN_HARD_BREAK asset (e.g. spec's canonical demo scenario --
+stg_customers.sql reading raw_customers.cust_id, which is renamed to
+customer_id -- but not limited to that one file; see below).
 
-Template-anchored generation: a Jinja skeleton
-(agent/codegen/templates/staging_model_patch.sql.jinja) defines the fixed SQL
-structure -- same header comment, same other columns, same source() call as
-the real stg_customers.sql -- and the LLM (or, with no key configured, a
-deterministic template fallback) fills only one constrained slot: the exact
-text of the column-selection line that must change to read the renamed
-source column while re-aliasing the output back to the original column name.
+Template-anchored generation: the model (or, with no key configured, a
+deterministic fallback) is asked to produce only one constrained slot -- the
+exact text of the column-selection line that must change to read the renamed
+source column while re-aliasing the output back to the original column name
+-- and that slot is spliced into the CALLER-SUPPLIED `file_content` at the
+exact line that referenced the old column, leaving every other line
+byte-for-byte unchanged (`_replace_column_line`).
 
 This is the safety property of "template-anchored": no matter what the model
-does or hallucinates, only that one slot's text can end up in the rendered
-file -- the rest of the structure is fixed by the skeleton, byte-for-byte.
+does or hallucinates, only that one line's text can end up in the rendered
+file. Earlier this was implemented by rendering a *static* Jinja skeleton
+file that hardcoded stg_customers.sql's exact structure (header comment,
+other column names, source table) -- which meant patching any OTHER origin
+file silently produced stg_customers-shaped content instead of that file's
+actual structure (syntactically valid SQL, so V1/V2 verification couldn't
+catch it -- caught by hand while building Phase 9's examples, see
+tests/test_codegen_generator.py's generalization tests). Splicing into the
+real `file_content` fixes this: the "skeleton" is now whatever file is
+actually being patched, not a fixed example of one.
 
 Mirrors agent/narrative/builder.py's discipline: a SYSTEM_PROMPT constrains
 the model to rephrase/transform given facts only, and `LLMNotConfigured`
@@ -24,16 +33,8 @@ access, so it is a first-class path, not an afterthought.
 from __future__ import annotations
 
 import re
-from pathlib import Path
-
-from jinja2 import Environment, FileSystemLoader
 
 from agent.narrative.llm_client import LLMClient, LLMNotConfigured, build_llm_client
-
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-SKELETON_TEMPLATE_NAME = "staging_model_patch.sql.jinja"
-
-_JINJA_ENV = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), keep_trailing_newline=True)
 
 SYSTEM_PROMPT = (
     "You are patching exactly one line of a dbt staging model's SQL SELECT "
@@ -74,16 +75,12 @@ def _extract_column_line(file_content: str, old_column: str) -> str | None:
     return None
 
 
-def _template_column_line(old_column: str, new_column: str, current_line: str | None) -> str:
+def _template_column_line(old_column: str, new_column: str, current_line: str) -> str:
     """Deterministic fallback: textually substitutes the source read while
-    re-aliasing the output back to `old_column`, preserving the current
-    line's indentation and trailing comma when available."""
-    if current_line is not None:
-        indent = current_line[: len(current_line) - len(current_line.lstrip())]
-        trailing_comma = "," if current_line.rstrip().endswith(",") else ""
-    else:
-        indent = "    "
-        trailing_comma = ","
+    re-aliasing the output back to `old_column`, preserving `current_line`'s
+    indentation and trailing comma."""
+    indent = current_line[: len(current_line) - len(current_line.lstrip())]
+    trailing_comma = "," if current_line.rstrip().endswith(",") else ""
     return f"{indent}{new_column} as {old_column}{trailing_comma}"
 
 
@@ -118,9 +115,20 @@ def _user_prompt(old_column: str, new_column: str, file_content: str, failure_ev
     return "\n".join(lines)
 
 
-def _render_skeleton(column_line: str) -> str:
-    template = _JINJA_ENV.get_template(SKELETON_TEMPLATE_NAME)
-    return template.render(column_line=column_line)
+def _replace_column_line(file_content: str, old_line: str, new_column_line: str) -> str:
+    """Splices `new_column_line` into `file_content` in place of `old_line`
+    (the exact line `_extract_column_line` identified as the one referencing
+    `old_column`), leaving every other line byte-for-byte unchanged -- this
+    is what makes the transformation "template-anchored" to whatever file is
+    actually being patched, not to a fixed example file. Preserves each
+    line's original trailing-newline style."""
+    lines = file_content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.rstrip("\n") == old_line:
+            newline = "\n" if line.endswith("\n") else ""
+            lines[i] = new_column_line.rstrip("\n") + newline
+            return "".join(lines)
+    raise ValueError(f"could not locate the line to replace in file_content: {old_line!r}")
 
 
 def generate_patch(
@@ -136,12 +144,16 @@ def generate_patch(
     (marts and their schema.yml tests) needs zero changes.
 
     `file_content` is the CURRENT content of the file being patched -- used
-    to locate the existing column-selection line (for LLM context and for
-    the template fallback's indentation/comma style). The returned content
-    is produced by rendering the fixed Jinja skeleton
-    (agent/codegen/templates/staging_model_patch.sql.jinja) with only the
-    column-selection line filled in, so the rest of the file's structure is
-    guaranteed unchanged regardless of what the LLM does.
+    both to locate the existing column-selection line (for LLM context and
+    for the template fallback's indentation/comma style) AND as the base
+    the new line is spliced into (`_replace_column_line`), so the returned
+    content is `file_content` with only that one line changed, regardless of
+    which file this is or what the LLM does.
+
+    Raises `ValueError` if `old_column` isn't found on any non-comment line
+    of `file_content` -- there is no line to safely anchor the replacement
+    to, and silently returning unmodified (or worse, unrelated) content
+    would be a correctness bug, not a graceful fallback.
 
     `failure_evidence`, when given, is the raw error from a prior failed
     verification attempt -- passed to the LLM (or ignored by the
@@ -157,6 +169,11 @@ def generate_patch(
     keep working unchanged once a real key is added later.
     """
     current_line = _extract_column_line(file_content, old_column)
+    if current_line is None:
+        raise ValueError(
+            f"column `{old_column}` not found on any non-comment line of the given file_content -- "
+            "nothing to anchor the patch to"
+        )
 
     resolved_client = llm_client
     if resolved_client is None:
@@ -181,4 +198,4 @@ def generate_patch(
     if not column_line:
         column_line = _template_column_line(old_column, new_column, current_line)
 
-    return _render_skeleton(column_line)
+    return _replace_column_line(file_content, current_line, column_line)

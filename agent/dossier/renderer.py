@@ -18,7 +18,7 @@ from __future__ import annotations
 import difflib
 
 from agent.assessment.models import AssessmentResult
-from agent.decision.models import AUTO_APPROVED, HUMAN_CONFIRMED, MigrationDecision
+from agent.decision.models import AUTO_APPROVED, BREAKING, HUMAN_CONFIRMED, MigrationDecision
 from agent.loops.self_correction_loop import PASSED, SelfCorrectionResult
 from agent.narrative.models import NarrativeResult
 
@@ -228,7 +228,10 @@ def render_dossier(
     ADDITIVE decision types run no codegen at all (agent/dossier/pipeline.py
     skips Loop 1 entirely for those), so there is nothing to pass -- in that
     case sections 4 ("Generated Code") and 5 ("Verification Gauntlet") are
-    omitted rather than fabricated.
+    omitted rather than fabricated. A BREAKING decision with no
+    self_correction (Strategy C, defer) is a distinct case from those two --
+    a fix genuinely IS needed, just deliberately not generated pending owner
+    sign-off -- so its banner must not claim "no code change required."
 
     `original_content` is the pre-patch content of the file self_correction
     touched, used only to build a meaningful diff for section 4 when there
@@ -245,7 +248,13 @@ def render_dossier(
     """
     lines = [f"# Blast Radius Dossier -- {assessment.changed_urn} column `{assessment.changed_column}`", ""]
 
-    if self_correction is None:
+    if self_correction is None and decision.decision_type == BREAKING:
+        lines.append("> **STATUS: DEFERRED -- A FIX IS NEEDED, BUT NOT GENERATED YET**")
+        lines.append(
+            f"> Decision: BREAKING, strategy {decision.recommended_strategy} (see section 3). "
+            "No codegen or verification was run -- see the rationale below before generating one."
+        )
+    elif self_correction is None:
         lines.append("> **STATUS: ASSESSMENT ONLY -- NO CODE CHANGE REQUIRED**")
         lines.append(f"> Decision: {decision.decision_type}. No codegen or verification was run.")
     elif self_correction.final_status == PASSED:

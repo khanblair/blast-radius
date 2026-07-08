@@ -1,0 +1,122 @@
+# Blast Radius Dossier -- urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.customer_master,PROD) column `customer_id`
+
+> **STATUS: DEFERRED -- A FIX IS NEEDED, BUT NOT GENERATED YET**
+> Decision: BREAKING, strategy C (see section 3). No codegen or verification was run -- see the rationale below before generating one.
+
+---
+
+## 1. Impact Assessment
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.customer_master,PROD)` column `customer_id`
+
+- Scanned: 7
+- Affected: 7
+- Hard breaks: 7
+- Silent-corruption risks: 0
+- Confirmed safe: 0
+- Distinct owners affected: 4
+- Deepest hop: 4
+
+### Severity matrix (ranked)
+
+| Severity | Asset | Break mode | Hop | Usage | Dashboard exposed |
+|---:|---|---|---:|---:|---|
+| 0.0 | stg_customer_master | HARD_BREAK | 1 | 40 | False |
+|  |  | evidence: `models/staging/stg_customer_master.sql:6: customer_id,` |  |  |  |
+| 0.0 | dim_customer | HARD_BREAK | 2 | 88 | False |
+|  |  | evidence: `models/core/dim_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+| 0.0 | fct_billing | HARD_BREAK | 3 | 210 | True |
+|  |  | evidence: `models/finance/fct_billing.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+| 0.0 | fct_revenue_recognition | HARD_BREAK | 4 | 340 | True |
+|  |  | evidence: `models/finance/fct_revenue_recognition.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+|  |  | evidence: `models/finance/fct_revenue_recognition.sql:19: b.*` |  |  |  |
+| 0.0 | dim_customer_segment | HARD_BREAK | 3 | 52 | False |
+|  |  | evidence: `models/marketing/dim_customer_segment.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+| 0.0 | fct_campaign_attribution | HARD_BREAK | 4 | 61 | False |
+|  |  | evidence: `models/marketing/fct_campaign_attribution.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+| 0.0 | fct_ticket_customer | HARD_BREAK | 2 | 19 | False |
+|  |  | evidence: `models/support/fct_ticket_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does` |  |  |  |
+
+---
+
+## 2. Causal Narratives
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.customer_master,PROD)` column `customer_id`
+
+### [HARD_BREAK] stg_customer_master  _(source: template)_
+
+`stg_customer_master` breaks because it directly references the changed column `customer_id` on `customer_master` (hop 1 from the changed table). This break is loud: dbt compilation or execution fails outright. 40 recorded queries against it. Evidence: models/staging/stg_customer_master.sql:6: customer_id,.
+
+Evidence cited:
+- `models/staging/stg_customer_master.sql:6: customer_id,`
+
+### [HARD_BREAK] dim_customer  _(source: template)_
+
+`dim_customer` breaks because an upstream dependency in its lineage fails first (hop 2 from the changed table). This break is loud: dbt compilation or execution fails outright. 88 recorded queries against it. Evidence: models/core/dim_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/core/dim_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+
+### [HARD_BREAK] fct_billing  _(source: template)_
+
+`fct_billing` breaks because an upstream dependency in its lineage fails first (hop 3 from the changed table). This break is loud: dbt compilation or execution fails outright. It feeds a dashboard; 210 recorded queries against it. Evidence: models/finance/fct_billing.sql: does not read public.customer_master directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/finance/fct_billing.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+
+### [HARD_BREAK] fct_revenue_recognition  _(source: template)_
+
+`fct_revenue_recognition` breaks because an upstream dependency in its lineage fails first (hop 4 from the changed table). This break is loud: dbt compilation or execution fails outright. However, `fct_revenue_recognition` also expands an upstream table via `SELECT *` -- a wrong patch here would break silently instead, with columns shifting rather than the query failing to compile. It feeds a dashboard; 340 recorded queries against it. Evidence: models/finance/fct_revenue_recognition.sql: does not read public.customer_master directly -- fails only because an upstream dependency does; models/finance/fct_revenue_recognition.sql:19: b.*.
+
+Evidence cited:
+- `models/finance/fct_revenue_recognition.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+- `models/finance/fct_revenue_recognition.sql:19: b.*`
+
+### [HARD_BREAK] dim_customer_segment  _(source: template)_
+
+`dim_customer_segment` breaks because an upstream dependency in its lineage fails first (hop 3 from the changed table). This break is loud: dbt compilation or execution fails outright. 52 recorded queries against it. Evidence: models/marketing/dim_customer_segment.sql: does not read public.customer_master directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/marketing/dim_customer_segment.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+
+### [HARD_BREAK] fct_campaign_attribution  _(source: template)_
+
+`fct_campaign_attribution` breaks because an upstream dependency in its lineage fails first (hop 4 from the changed table). This break is loud: dbt compilation or execution fails outright. 61 recorded queries against it. Evidence: models/marketing/fct_campaign_attribution.sql: does not read public.customer_master directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/marketing/fct_campaign_attribution.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+
+### [HARD_BREAK] fct_ticket_customer  _(source: template)_
+
+`fct_ticket_customer` breaks because an upstream dependency in its lineage fails first (hop 2 from the changed table). This break is loud: dbt compilation or execution fails outright. 19 recorded queries against it. Evidence: models/support/fct_ticket_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/support/fct_ticket_customer.sql: does not read public.customer_master directly -- fails only because an upstream dependency does`
+
+
+---
+
+## 3. Migration Decision -- BREAKING
+
+7 hard break(s) across a lineage chain reaching affected hop 4 exceed the bar for a same-day fix (> 5 hard breaks or affected hop >= 4) -- recommend deferring to a deprecation cycle with owner sign-off rather than rushing a patch across this much surface area.
+
+### Options
+- **A. Direct patch**
+  - Patch every consumer in one PR.
+  - Trade-off: Clean and atomic, but big-bang risk.
+- **B. Bridge migration**
+  - Add a compatibility view aliasing old -> new, patch consumers gradually, remove the bridge later.
+  - Trade-off: Zero-downtime and gradual, but more moving parts and a cleanup step you can forget.
+- **C. Defer & deprecate** **(RECOMMENDED)**
+  - Blast radius is too large/risky to fix now; recommend a deprecation cycle with owner sign-off instead of an immediate fix.
+  - Trade-off: Avoids a risky rushed fix, but doesn't solve the problem today.
+
+### Rejected alternatives
+- **A**: Direct patch rejected: would require touching all 7 hard breaks in a single PR -- too much simultaneous surface area to land safely.
+- **B**: Bridge migration rejected: a bridge still requires patching every consumer eventually across a chain this deep (affected hop 4); the risk is the size and depth of the blast radius itself, which a bridge doesn't shrink.
+
+### Confirmation
+- confirmation_mode: `AUTO_APPROVED`
+- human_confirmed: `False`
+- Auto-approved (policy bypass, NOT a human sign-off) -- strategy **C** (human_confirmed=False)
+

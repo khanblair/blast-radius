@@ -342,3 +342,24 @@ def test_no_migration_needed_dossier_omits_code_and_verification_sections():
     assert "## 5. Verification Gauntlet" not in dossier
     assert "ASSESSMENT ONLY" in dossier
     assert "NO_MIGRATION_NEEDED" in dossier
+
+
+def test_deferred_breaking_dossier_does_not_claim_no_code_change_required():
+    # Strategy C (defer): a fix genuinely IS needed, just not generated yet
+    # pending owner sign-off -- the banner must say so, not claim "no code
+    # change required" the way NO_MIGRATION_NEEDED/ADDITIVE correctly do.
+    deferred_decision = MigrationDecision(
+        decision_type=BREAKING,
+        rationale="Blast radius too large for a same-day fix.",
+        options=[StrategyOption("C", "Defer & deprecate", "...", "...")],
+        recommended_strategy="C",
+        rejected=[RejectedStrategy("A", "..."), RejectedStrategy("B", "...")],
+    )
+    dossier = render_dossier(_assessment(), _narrative(), deferred_decision, self_correction=None)
+
+    assert "## 1. Impact Assessment" in dossier
+    assert "## 4. Generated Code" not in dossier
+    assert "## 5. Verification Gauntlet" not in dossier
+    assert "NO CODE CHANGE REQUIRED" not in dossier
+    assert "DEFERRED" in dossier
+    assert "strategy C" in dossier

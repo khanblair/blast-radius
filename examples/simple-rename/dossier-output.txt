@@ -1,0 +1,146 @@
+========================================================================
+DRY RUN -- no git or GitHub operations were performed.
+========================================================================
+
+Would open a PR against: khanblair/blast-radius (main <- blast-radius/raw_customers-cust_id-to-customer_id-84b334)
+Would modify: models/staging/stg_customers.sql
+
+--- File change ---
+
+```diff
+--- models/staging/stg_customers.sql (before)
++++ models/staging/stg_customers.sql (after)
+@@ -1,7 +1,7 @@
+ -- Explicit cust_id reference: the deliberate HARD_BREAK dependency for the
+ -- canonical Blast Radius change (raw_customers.cust_id -> customer_id).
+ select
+-    cust_id,
++    customer_id as cust_id,
+     first_name,
+     last_name,
+     email,
+```
+
+--- Would-be PR body (the dossier) ---
+
+# Blast Radius Dossier -- urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD) column `cust_id`
+
+> ## STATUS: PASSED -- READY FOR REVIEW
+>
+> All verification levels passed after 1 attempt(s). The generated patch below is ready to deliver.
+
+---
+
+## 1. Impact Assessment
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD)` column `cust_id`
+
+- Scanned: 4
+- Affected: 3
+- Hard breaks: 3
+- Silent-corruption risks: 0
+- Confirmed safe: 1
+- Distinct owners affected: 2
+- Deepest hop: 2
+
+### Severity matrix (ranked)
+
+| Severity | Asset | Break mode | Hop | Usage | Dashboard exposed |
+|---:|---|---|---:|---:|---|
+| 88.0 | fct_revenue | HARD_BREAK | 2 | 12 | True |
+|  |  | evidence: `models/marts/fct_revenue.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does` |  |  |  |
+|  |  | evidence: `models/marts/fct_revenue.sql:12: c.*` |  |  |  |
+| 44.0 | dim_customers | HARD_BREAK | 2 | 1 | True |
+|  |  | evidence: `models/marts/dim_customers.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does` |  |  |  |
+| 22.0 | stg_customers | HARD_BREAK | 1 | 1 | True |
+|  |  | evidence: `models/staging/stg_customers.sql:4: cust_id,` |  |  |  |
+| 0.0 | fct_orders | UNAFFECTED | 2 | 5 | True |
+
+---
+
+## 2. Causal Narratives
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD)` column `cust_id`
+
+### [HARD_BREAK] fct_revenue  _(source: template)_
+
+`fct_revenue` breaks because an upstream dependency in its lineage fails first (hop 2 from the changed table). This break is loud: dbt compilation or execution fails outright. However, `fct_revenue` also expands an upstream table via `SELECT *` -- a wrong patch here would break silently instead, with columns shifting rather than the query failing to compile. It feeds a dashboard; 12 recorded queries against it. Evidence: models/marts/fct_revenue.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does; models/marts/fct_revenue.sql:12: c.*.
+
+Evidence cited:
+- `models/marts/fct_revenue.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does`
+- `models/marts/fct_revenue.sql:12: c.*`
+
+### [HARD_BREAK] dim_customers  _(source: template)_
+
+`dim_customers` breaks because an upstream dependency in its lineage fails first (hop 2 from the changed table). This break is loud: dbt compilation or execution fails outright. It feeds a dashboard; 1 recorded query against it. Evidence: models/marts/dim_customers.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does.
+
+Evidence cited:
+- `models/marts/dim_customers.sql: does not read public.raw_customers directly -- fails only because an upstream dependency does`
+
+### [HARD_BREAK] stg_customers  _(source: template)_
+
+`stg_customers` breaks because it directly references the changed column `cust_id` on `raw_customers` (hop 1 from the changed table). This break is loud: dbt compilation or execution fails outright. It feeds a dashboard; 1 recorded query against it. Evidence: models/staging/stg_customers.sql:4: cust_id,.
+
+Evidence cited:
+- `models/staging/stg_customers.sql:4: cust_id,`
+
+_Confirmed safe -- unaffected by this change: fct_orders._
+
+---
+
+## 3. Migration Decision -- BREAKING
+
+fct_revenue, dim_customers, stg_customers are dashboard-exposed -- a one-shot cutover risks a visible break for someone looking at a dashboard directly. Recommend a compatibility bridge so consumers migrate gradually instead.
+
+### Options
+- **A. Direct patch**
+  - Patch every consumer in one PR.
+  - Trade-off: Clean and atomic, but big-bang risk.
+- **B. Bridge migration** **(RECOMMENDED)**
+  - Add a compatibility view aliasing old -> new, patch consumers gradually, remove the bridge later.
+  - Trade-off: Zero-downtime and gradual, but more moving parts and a cleanup step you can forget.
+- **C. Defer & deprecate**
+  - Blast radius is too large/risky to fix now; recommend a deprecation cycle with owner sign-off instead of an immediate fix.
+  - Trade-off: Avoids a risky rushed fix, but doesn't solve the problem today.
+
+### Rejected alternatives
+- **A**: Direct patch rejected: fct_revenue, dim_customers, stg_customers are dashboard-exposed, so a big-bang patch risks a visible break there before every consumer is updated.
+- **C**: Defer & deprecate rejected: blast radius (3 hard break(s)) is not large or deep enough to justify delaying a fix that a bridge can deliver safely now.
+
+### Confirmation
+- confirmation_mode: `AUTO_APPROVED`
+- human_confirmed: `False`
+- Auto-approved (policy bypass, NOT a human sign-off) -- strategy **B** (human_confirmed=False)
+
+---
+
+## 4. Generated Code
+
+File: `models/staging/stg_customers.sql`
+
+Diff: pre-patch original -> attempt 1 (only attempt).
+
+```diff
+--- models/staging/stg_customers.sql (original)
++++ models/staging/stg_customers.sql (attempt 1)
+@@ -1,7 +1,7 @@
+ -- Explicit cust_id reference: the deliberate HARD_BREAK dependency for the
+ -- canonical Blast Radius change (raw_customers.cust_id -> customer_id).
+ select
+-    cust_id,
++    customer_id as cust_id,
+     first_name,
+     last_name,
+     email,
+```
+
+---
+
+## 5. Verification Gauntlet
+
+### Attempt 1: PASS
+- `[V1_STATIC]` **PASS** -- models/staging/stg_customers.sql parses as valid postgres SQL
+- `[V2_COMPILE]` **PASS** -- dbt compile succeeded for model 'stg_customers'
+
+**final_status: PASSED**
+

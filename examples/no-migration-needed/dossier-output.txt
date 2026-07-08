@@ -1,0 +1,57 @@
+# Blast Radius Dossier -- urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD) column `loyalty_tier`
+
+> **STATUS: ASSESSMENT ONLY -- NO CODE CHANGE REQUIRED**
+> Decision: ADDITIVE. No codegen or verification was run.
+
+---
+
+## 1. Impact Assessment
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD)` column `loyalty_tier`
+
+- Scanned: 4
+- Affected: 1
+- Hard breaks: 0
+- Silent-corruption risks: 1
+- Confirmed safe: 3
+- Distinct owners affected: 1
+- Deepest hop: 2
+
+### Severity matrix (ranked)
+
+| Severity | Asset | Break mode | Hop | Usage | Dashboard exposed |
+|---:|---|---|---:|---:|---|
+| 52.8 | fct_revenue | SILENT_CORRUPTION | 2 | 12 | True |
+|  |  | evidence: `models/marts/fct_revenue.sql:12: c.*` |  |  |  |
+| 0.0 | dim_customers | UNAFFECTED | 2 | 1 | True |
+| 0.0 | stg_customers | UNAFFECTED | 1 | 1 | True |
+| 0.0 | fct_orders | UNAFFECTED | 2 | 5 | True |
+
+---
+
+## 2. Causal Narratives
+
+**Changed:** `urn:li:dataset:(urn:li:dataPlatform:postgres,warehouse.public.raw_customers,PROD)` column `loyalty_tier`
+
+### [SILENT_CORRUPTION] fct_revenue  _(source: template)_
+
+`fct_revenue` is unaffected -- it does not read the changed column (hop 2 from the changed table). This is a silent-corruption risk, not a loud break: it expands an upstream table via `SELECT *` with no compile-time failure, so a wrong patch could ship undetected. It feeds a dashboard; 12 recorded queries against it. Evidence: models/marts/fct_revenue.sql:12: c.*.
+
+Evidence cited:
+- `models/marts/fct_revenue.sql:12: c.*`
+
+_Confirmed safe -- unaffected by this change: dim_customers, fct_orders, stg_customers._
+
+---
+
+## 3. Migration Decision -- ADDITIVE
+
+Declared change type 'add_column' is non-breaking by construction (a new nullable column or a lossless type widening cannot invalidate an existing consumer's query) -- 1 downstream asset(s) reference the changed column, but none require patching. Action: documentation proposal only; consumers notified, not patched.
+
+### Confirmation
+- confirmation_mode: `NOT_APPLICABLE`
+- human_confirmed: `False`
+- Not applicable -- no strategy to confirm (human_confirmed=False)
+
+
+No code change was needed -- PR delivery skipped.

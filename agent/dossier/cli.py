@@ -70,15 +70,19 @@ def main(argv: list[str] | None = None) -> None:
         max_attempts=args.max_attempts,
     )
 
-    print(result["dossier_markdown"])
-
-    if not result["pr_attempted"]:
-        print()
-        print("No code change was needed -- PR delivery skipped.")
-    elif result["pr_result"] is not None:
-        print()
-        print(f"PR created: {result['pr_result']}")
-    # else: create_pr already printed its dry-run preview as a side effect.
+    if result["pr_attempted"] and result["pr_result"] is None:
+        # Dry-run: create_pr already printed a full preview (dossier
+        # included as the would-be PR body) as a side effect -- printing
+        # the dossier again here would just duplicate it.
+        pass
+    else:
+        print(result["dossier_markdown"])
+        if not result["pr_attempted"]:
+            print()
+            print("No code change was needed -- PR delivery skipped.")
+        else:
+            print()
+            print(f"PR created: {result['pr_result']}")
 
 
 if __name__ == "__main__":

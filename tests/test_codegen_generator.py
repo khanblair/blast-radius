@@ -21,6 +21,10 @@ ORIGINAL_STG_CUSTOMERS = (
     Path(__file__).resolve().parents[1] / "estate" / "dbt_project" / "models" / "staging" / "stg_customers.sql"
 ).read_text()
 
+ORIGINAL_STG_PAYMENTS = (
+    Path(__file__).resolve().parents[1] / "estate" / "dbt_project" / "models" / "staging" / "stg_payments.sql"
+).read_text()
+
 
 def _clear_all_provider_keys(monkeypatch):
     for env_var in PROVIDER_API_KEY_ENV.values():
@@ -150,3 +154,47 @@ def test_llm_failure_falls_back_to_template():
     patched = generate_patch("cust_id", "customer_id", ORIGINAL_STG_CUSTOMERS, llm_client=client)
 
     assert "customer_id as cust_id," in patched
+
+
+# --- generalization to a different origin file --------------------------
+# Regression coverage for a real bug found while building Phase 9's examples:
+# generate_patch used to render a *fixed* Jinja skeleton hardcoded to
+# stg_customers.sql's exact structure, so patching any OTHER file silently
+# produced stg_customers-shaped content instead of that file's own
+# structure. It now splices into the caller-supplied file_content directly,
+# so it must work correctly against a completely different file.
+
+
+def test_template_fallback_generalizes_to_a_different_origin_file(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)
+
+    patched = generate_patch("payment_method", "payment_channel", ORIGINAL_STG_PAYMENTS, llm_client=None)
+
+    assert "payment_channel as payment_method," in patched
+    assert "payment_id" in patched and "order_id" in patched and "payment_date" in patched
+    assert "raw_payments" in patched
+    # must NOT bleed in stg_customers.sql's unrelated structure
+    assert "raw_customers" not in patched
+    assert "first_name" not in patched
+
+
+def test_template_fallback_preserves_a_different_file_byte_for_byte_except_one_line(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)
+
+    patched = generate_patch("payment_method", "payment_channel", ORIGINAL_STG_PAYMENTS, llm_client=None)
+
+    original_lines = ORIGINAL_STG_PAYMENTS.splitlines()
+    patched_lines = patched.splitlines()
+
+    assert len(original_lines) == len(patched_lines)
+    for original_line, patched_line in zip(original_lines, patched_lines):
+        if "payment_method," in original_line and "select" not in original_line:
+            continue  # the one slot allowed to change
+        assert original_line == patched_line
+
+
+def test_generate_patch_raises_when_old_column_not_found():
+    import pytest
+
+    with pytest.raises(ValueError, match="not found"):
+        generate_patch("nonexistent_column", "new_name", ORIGINAL_STG_CUSTOMERS, llm_client=None)
