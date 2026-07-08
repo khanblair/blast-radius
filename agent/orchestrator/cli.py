@@ -13,6 +13,9 @@ import json
 import sys
 
 from agent.assessment.engine import assess_change
+from agent.decision.engine import decide_migration
+from agent.decision.gate import confirm_decision, render_decision
+from agent.decision.models import AUTO_APPROVED
 from agent.loops.reasoning_loop import ReasoningLoop
 from agent.orchestrator.mcp_client import datahub_mcp_session
 
@@ -76,6 +79,66 @@ async def _run_assess(args: argparse.Namespace) -> None:
         print(f"\nWrote assessment JSON to {args.json_out}")
 
 
+async def _run_decide(args: argparse.Namespace) -> None:
+    """Stage 3 / Loop 4 gate #1: run the same assessment `assess` runs, feed
+    it through the deterministic Decision Engine, render the result, and
+    apply the human confirmation gate (skipped non-interactively when
+    `--auto-approve` is passed)."""
+    async with datahub_mcp_session() as session:
+        resolver_loop = ReasoningLoop(session=session, run_id="resolve")
+        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform)
+
+    result = await assess_change(
+        changed_urn=changed_urn,
+        changed_column=args.column,
+        source_schema=args.schema,
+        source_table=args.table,
+        max_hops=args.max_hops,
+        max_tool_calls=args.max_tool_calls,
+    )
+
+    decision = decide_migration(result, change_type=args.change_type)
+
+    print(render_summary(result))
+    print()
+    print(render_decision(decision))
+
+    confirm_decision(decision, auto_approve=args.auto_approve)
+
+    print()
+    if decision.recommended_strategy is None:
+        print(f"CONFIRMATION: not applicable ({decision.decision_type})")
+    elif decision.confirmation_mode == AUTO_APPROVED:
+        print(f"CONFIRMATION: auto-approved -- proceeding with Strategy {decision.confirmed_strategy}")
+    else:
+        print(f"CONFIRMATION: human-confirmed -- proceeding with Strategy {decision.confirmed_strategy}")
+
+
+def _add_decide_parser(subparsers: argparse._SubParsersAction) -> None:
+    decide_parser = subparsers.add_parser(
+        "decide", help="Decide whether a declared column change needs a migration, and which strategy"
+    )
+    decide_parser.add_argument("--table", required=True, help="Bare table name, e.g. raw_customers")
+    decide_parser.add_argument("--column", required=True, help="Column being changed, e.g. cust_id")
+    decide_parser.add_argument("--schema", default="public")
+    decide_parser.add_argument("--platform", default="postgres")
+    decide_parser.add_argument("--max-hops", dest="max_hops", type=int, default=3)
+    decide_parser.add_argument("--max-tool-calls", dest="max_tool_calls", type=int, default=30)
+    decide_parser.add_argument(
+        "--change-type",
+        dest="change_type",
+        default="rename",
+        choices=["rename", "add_column", "widen_type", "drop_column"],
+        help="Nature of the declared change -- determines ADDITIVE eligibility",
+    )
+    decide_parser.add_argument(
+        "--auto-approve",
+        dest="auto_approve",
+        action="store_true",
+        help="Skip the interactive confirmation prompt (required for scripted/non-interactive runs)",
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="blast-radius")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -89,9 +152,13 @@ def main(argv: list[str] | None = None) -> None:
     assess_parser.add_argument("--max-tool-calls", dest="max_tool_calls", type=int, default=30)
     assess_parser.add_argument("--json-out", dest="json_out", default=None)
 
+    _add_decide_parser(subparsers)
+
     args = parser.parse_args(argv)
     if args.command == "assess":
         asyncio.run(_run_assess(args))
+    elif args.command == "decide":
+        asyncio.run(_run_decide(args))
 
 
 if __name__ == "__main__":
