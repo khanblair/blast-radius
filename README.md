@@ -50,7 +50,7 @@ python -m agent.dossier.cli            --table raw_customers --old-column cust_i
 python -m agent.watch.cli              --table raw_customers
 ```
 
-`agent.dossier.cli` runs the full pipeline end to end and is the one most worth trying first. It never opens a real PR unless you explicitly pass `--create-pr` (see `agent/dossier/pr.py`'s module docstring before ever doing that).
+`agent.dossier.cli` runs the full pipeline end to end and is the one most worth trying first. It never opens a real PR unless you explicitly pass `--create-pr` (see `agent/dossier/pr.py`'s module docstring before ever doing that). Every run saves the rendered dossier to `dossiers/<table>-<old>-to-<new>-<timestamp>.md` (override with `--output PATH`) — that's the durable, shareable artifact after a run, not just terminal output. Add `--write-to-datahub` to also persist it as a Document inside DataHub itself, linked to every affected asset.
 
 ## Repository layout
 
@@ -60,9 +60,10 @@ blast-radius/
 ├── estate/           # dbt project, seeds, ingestion recipes, DataHub metadata emitters, golden outputs
 ├── traces/           # per-run reasoning + self-correction traces (gitignored, demo-run artifacts)
 ├── watch_state/      # watch-mode schema snapshots + outcome log (gitignored, demo-run artifacts)
+├── dossiers/         # saved dossier markdown files from CLI runs (gitignored, demo-run artifacts)
 ├── examples/         # 3 complete runs spanning the decision spectrum: dossier + trace each
 ├── skills/           # packaged DataHub Skill (OSS contribution)
-├── tests/            # unit tests (184 passing)
+├── tests/            # unit tests (188 passing)
 ├── feedback-notes.md # running log of DataHub/MCP friction, for the Feedback Prize
 └── docs/             # spec, kickoff guide, demo script
 ```

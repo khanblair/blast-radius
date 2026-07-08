@@ -20,3 +20,7 @@ traces/*.jsonl
 # watch mode run-state (schema snapshots + outcome log) -- demo-run
 # artifacts, not source
 watch_state/
+
+# saved dossier markdown files -- demo-run artifacts, not source
+# (curated ones live in examples/ instead, which IS tracked)
+dossiers/*.md

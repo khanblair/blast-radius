@@ -1,8 +1,10 @@
 """Standalone dossier CLI (Phase 7) -- the demo's actual spine: runs the
-full spec pipeline end to end (agent.dossier.pipeline.run_full_pipeline) and
-prints the resulting dossier, plus a PR preview/result.
+full spec pipeline end to end (agent.dossier.pipeline.run_full_pipeline),
+prints the resulting dossier, and saves it to disk under dossiers/ (or
+--output) so there's a durable file to open/share after the run, not just
+terminal scrollback.
 
-    python -m agent.dossier.cli --table raw_customers --old-column cust_id --new-column customer_id [--auto-approve] [--create-pr] [--write-to-datahub]
+    python -m agent.dossier.cli --table raw_customers --old-column cust_id --new-column customer_id [--auto-approve] [--create-pr] [--write-to-datahub] [--output PATH]
 
 SAFETY: `--create-pr` sets create_pr_live=True, which would attempt a REAL
 GitHub PR via PyGithub against the real khanblair/blast-radius repo. Per
@@ -25,8 +27,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 from agent.dossier.pipeline import run_full_pipeline
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DOSSIERS_DIR = REPO_ROOT / "dossiers"
+
+
+def _default_output_path(table: str, old_column: str, new_column: str) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{table}-{old_column}-to-{new_column}-{timestamp}.md"
+    return DOSSIERS_DIR / filename
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -66,6 +79,13 @@ def main(argv: list[str] | None = None) -> None:
             "Persist the rendered dossier as a Document in this project's own local DataHub "
             "instance, linked to every affected asset. Off by default -- see this module's docstring."
         ),
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        dest="output",
+        default=None,
+        help="Path to save the dossier markdown to. Defaults to dossiers/<table>-<old>-to-<new>-<timestamp>.md",
     )
     parser.add_argument("--max-hops", dest="max_hops", type=int, default=3)
     parser.add_argument("--max-tool-calls", dest="max_tool_calls", type=int, default=30)
@@ -108,6 +128,12 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Dossier saved to DataHub: {result['datahub_document_urn']}")
         else:
             print("Dossier write to DataHub was attempted but did not succeed (see traces/ for details).")
+
+    output_path = Path(args.output) if args.output else _default_output_path(args.table, args.old_column, args.new_column)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(result["dossier_markdown"])
+    print()
+    print(f"Dossier saved to: {output_path}")
 
 
 if __name__ == "__main__":

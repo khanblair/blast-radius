@@ -94,5 +94,5 @@ Every CLI supports `--help`. Six entry points:
 | `python -m agent.orchestrator.cli decide --table T --column C [--auto-approve]` | + Migration Decision (Stage 3, Loop 4 gate #1). |
 | `python -m agent.narrative.cli --table T --column C` | Causal narratives only (Stage 2). |
 | `python -m agent.codegen.cli --table T --old-column C --new-column C2` | Codegen + Loop 1 self-correction only (Stage 4). |
-| `python -m agent.dossier.cli --table T --old-column C --new-column C2 [--auto-approve] [--create-pr]` | The full pipeline end to end (Stages 0–6). |
+| `python -m agent.dossier.cli --table T --old-column C --new-column C2 [--auto-approve] [--create-pr] [--write-to-datahub] [--output PATH]` | The full pipeline end to end (Stages 0–6). Every run saves the dossier to `dossiers/` automatically. |
 | `python -m agent.watch.cli --table T` | One watch-mode cycle: capture, diff, trigger (Loop 5). |
