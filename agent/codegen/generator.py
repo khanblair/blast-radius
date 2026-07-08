@@ -75,29 +75,55 @@ def _extract_column_line(file_content: str, old_column: str) -> str | None:
     return None
 
 
-def _template_column_line(old_column: str, new_column: str, current_line: str) -> str:
-    """Deterministic fallback: textually substitutes the source read while
-    re-aliasing the output back to `old_column`, preserving `current_line`'s
-    indentation and trailing comma."""
+def _normalize_line_style(core_text: str, current_line: str) -> str:
+    """Reapplies `current_line`'s exact indentation and trailing-comma style
+    to `core_text` -- indentation and comma placement are structural facts
+    about the file being patched, not something to trust an LLM's raw text
+    formatting for. A live run against a real provider (DeepSeek) proved
+    this the hard way: the system prompt explicitly asks the model to
+    preserve the original indentation, and on one call it did -- on another,
+    functionally identical call, it silently dropped the leading whitespace
+    (still valid SQL, since whitespace is insignificant there, but a
+    formatting regression a human reviewer would notice). Both the LLM path
+    and the deterministic template path now go through this single
+    normalizer instead of each independently trying to get formatting
+    right, so this can never regress for either path again.
+
+    `core_text` must be non-empty (trimmed) -- callers must check for an
+    empty/garbage LLM response and fall back to the template *before*
+    calling this, since normalizing an empty string would silently produce
+    a syntactically-plausible-looking but empty `"    ,"` line."""
+    core_text = core_text.strip()
+    if not core_text:
+        raise ValueError("core_text must be non-empty -- caller should have fallen back to the template")
+    if core_text.endswith(","):
+        core_text = core_text[:-1].rstrip()
     indent = current_line[: len(current_line) - len(current_line.lstrip())]
     trailing_comma = "," if current_line.rstrip().endswith(",") else ""
-    return f"{indent}{new_column} as {old_column}{trailing_comma}"
+    return f"{indent}{core_text}{trailing_comma}"
+
+
+def _template_column_line(old_column: str, new_column: str, current_line: str) -> str:
+    """Deterministic fallback: textually substitutes the source read while
+    re-aliasing the output back to `old_column`, in `current_line`'s style."""
+    return _normalize_line_style(f"{new_column} as {old_column}", current_line)
 
 
 def _clean_llm_output(text: str) -> str:
-    """Strips only surrounding blank lines and defensively removes markdown
-    code fences, in case the model wraps its one-line answer in ```sql ...
-    ``` despite the system prompt's instruction not to. Deliberately does
-    NOT call `.strip()` on the whole blob -- that would also eat the line's
-    leading indentation, which the system prompt explicitly asks the model
-    to preserve."""
-    text = text.strip("\n")
+    """Strips surrounding whitespace and defensively removes markdown code
+    fences, in case the model wraps its one-line answer in ```sql ... ```
+    despite the system prompt's instruction not to. Returns the "core" text
+    only -- callers must reapply the correct indentation/comma style via
+    `_normalize_line_style` rather than trusting this output's whitespace,
+    since a live LLM has been observed to drop leading indentation on some
+    calls and preserve it on others for the identical request."""
+    text = text.strip()
     lines = text.split("\n")
     if lines and lines[0].strip().startswith("```"):
         lines = lines[1:]
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
-    return "\n".join(lines).strip("\n")
+    return "\n".join(lines).strip()
 
 
 def _user_prompt(old_column: str, new_column: str, file_content: str, failure_evidence: str | None) -> str:
@@ -188,7 +214,11 @@ def generate_patch(
             raw = resolved_client.generate(
                 SYSTEM_PROMPT, _user_prompt(old_column, new_column, file_content, failure_evidence)
             )
-            column_line = _clean_llm_output(raw)
+            core_text = _clean_llm_output(raw)
+            # Empty/garbage LLM output must fall through to the template
+            # below -- normalizing an empty core_text would otherwise
+            # silently produce a malformed line (see _normalize_line_style).
+            column_line = _normalize_line_style(core_text, current_line) if core_text else None
         except Exception:
             # A runtime failure (rate limit, network, transient API error)
             # shouldn't block codegen -- fall back to the template just like

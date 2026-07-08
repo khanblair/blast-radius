@@ -135,6 +135,39 @@ def test_failure_evidence_reaches_the_llm_prompt_on_retry():
     assert "column c.customer_id does not exist" in captured[0]
 
 
+def test_llm_output_with_no_leading_indentation_is_normalized_to_match_file_style():
+    # Regression coverage for a real bug found via a live DeepSeek call: the
+    # exact same request (raw_customers.cust_id -> customer_id) returned
+    # correctly-indented output on one call and, on a separate,
+    # functionally identical call, silently dropped the leading whitespace
+    # -- still valid SQL (whitespace-insignificant), but a formatting
+    # regression a human reviewer would notice. Codegen must not trust an
+    # LLM's raw whitespace for a structural fact like indentation.
+    def unindented_generate(system, user):
+        return "customer_id as cust_id"  # no leading spaces, no trailing comma
+
+    client = build_llm_client(provider="anthropic", generate_fn=unindented_generate)
+    patched = generate_patch("cust_id", "customer_id", ORIGINAL_STG_CUSTOMERS, llm_client=client)
+
+    assert "    customer_id as cust_id,\n    first_name," in patched
+
+
+def test_llm_output_that_is_only_whitespace_falls_back_to_template():
+    # The empty-core guard: normalizing an empty/whitespace-only LLM
+    # response must not silently produce a malformed line (e.g. "    ,") --
+    # it must fall back to the template instead.
+    def blank_generate(system, user):
+        return "   \n  "
+
+    client = build_llm_client(provider="anthropic", generate_fn=blank_generate)
+    patched = generate_patch("cust_id", "customer_id", ORIGINAL_STG_CUSTOMERS, llm_client=client)
+
+    assert "customer_id as cust_id," in patched
+    assert ",," not in patched
+    for line in patched.splitlines():
+        assert line.strip() != ","
+
+
 def test_llm_output_survives_markdown_fence_wrapping():
     def fenced_generate(system, user):
         return "```sql\n    customer_id as cust_id,\n```"

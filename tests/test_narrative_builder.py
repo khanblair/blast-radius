@@ -18,7 +18,14 @@ from agent.assessment.models import (
     AssetAssessment,
 )
 from agent.narrative.builder import build_narratives
-from agent.narrative.llm_client import build_llm_client
+from agent.narrative.llm_client import PROVIDER_API_KEY_ENV, build_llm_client
+
+
+def _clear_all_provider_keys(monkeypatch):
+    for env_var in PROVIDER_API_KEY_ENV.values():
+        monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
 
 
 def _asset(**overrides):
@@ -149,7 +156,8 @@ def test_llm_failure_falls_back_to_template_for_that_asset():
 # --- template fallback path (no LLM configured) -----------------------------
 
 
-def test_template_fallback_used_when_no_llm_client_given():
+def test_template_fallback_used_when_no_llm_client_given(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)  # force the no-key path regardless of this machine's actual .env
     asset = _asset(
         name="stg_customers",
         compile_status=ORIGIN_HARD_BREAK,
@@ -157,8 +165,6 @@ def test_template_fallback_used_when_no_llm_client_given():
     )
     result = AssessmentResult(changed_urn="urn:root", changed_column="cust_id", scanned=[asset], deepest_hop=1)
 
-    # llm_client=None with no LLM_PROVIDER API key configured in this
-    # environment's .env -- this is the exact path the demo runs under.
     narrative_result = build_narratives(result, changed_table="raw_customers", llm_client=None)
 
     narrative = narrative_result.narratives[0]
@@ -168,7 +174,8 @@ def test_template_fallback_used_when_no_llm_client_given():
     assert "models/staging/stg_customers.sql:4: cust_id," in narrative.narrative_text
 
 
-def test_template_narrative_states_origin_vs_cascade_distinctly():
+def test_template_narrative_states_origin_vs_cascade_distinctly(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)
     origin = _asset(name="stg_customers", compile_status=ORIGIN_HARD_BREAK, evidence=["a.sql:1: cust_id"])
     cascade = _asset(name="dim_customers", compile_status=CASCADE_HARD_BREAK, hop=2)
     result = AssessmentResult(
@@ -182,11 +189,12 @@ def test_template_narrative_states_origin_vs_cascade_distinctly():
     assert "upstream dependency" in by_name["dim_customers"]
 
 
-def test_template_narrative_flags_silent_patch_risk_on_hard_break_with_select_star():
+def test_template_narrative_flags_silent_patch_risk_on_hard_break_with_select_star(monkeypatch):
     # This is the fct_revenue case from the real estate and spec §3's own
     # example: a hard break today (compile_status is CASCADE_HARD_BREAK, so
     # break_mode is HARD_BREAK) that *also* carries a SELECT * -- a wrong fix
     # would turn today's loud failure into tomorrow's silent corruption.
+    _clear_all_provider_keys(monkeypatch)
     fct_revenue = _asset(
         name="fct_revenue",
         compile_status=CASCADE_HARD_BREAK,
@@ -208,7 +216,8 @@ def test_template_narrative_flags_silent_patch_risk_on_hard_break_with_select_st
     assert "models/marts/fct_revenue.sql:12: c.*" in text
 
 
-def test_template_narrative_does_not_invent_facts_when_none_present():
+def test_template_narrative_does_not_invent_facts_when_none_present(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)
     bare = _asset(
         name="bare_model",
         compile_status=ORIGIN_HARD_BREAK,
@@ -227,7 +236,8 @@ def test_template_narrative_does_not_invent_facts_when_none_present():
     assert "queries" not in text.lower() and "query" not in text.lower()
 
 
-def test_template_narrative_mentions_dashboard_and_usage_when_present():
+def test_template_narrative_mentions_dashboard_and_usage_when_present(monkeypatch):
+    _clear_all_provider_keys(monkeypatch)
     exposed = _asset(
         name="fct_revenue",
         compile_status=CASCADE_HARD_BREAK,
