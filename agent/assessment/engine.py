@@ -139,6 +139,7 @@ async def assess_change(
                     is_dashboard_exposed=name in dashboard_upstream_names,
                     owners=owners,
                     has_business_owner=has_business_owner,
+                    dbt_file_path=file_path,
                 )
             )
 

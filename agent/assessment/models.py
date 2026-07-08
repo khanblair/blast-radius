@@ -27,6 +27,7 @@ class AssetAssessment:
     owners: list[str] = field(default_factory=list)
     has_business_owner: bool = False
     severity_score: float = 0.0
+    dbt_file_path: str | None = None  # project-relative, e.g. "models/staging/stg_customers.sql"; None when this asset has no local dbt model (e.g. a pure postgres-only sibling)
 
     @property
     def break_mode(self) -> str:

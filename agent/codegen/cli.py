@@ -60,21 +60,6 @@ def render_result(result: SelfCorrectionResult) -> str:
     return "\n".join(lines)
 
 
-def _dbt_file_path_from_evidence(asset: AssetAssessment) -> str | None:
-    """AssetAssessment carries no `dbt_file_path` field of its own -- the
-    Assessment Engine only ever writes that path as a prefix inside its
-    evidence strings (agent/assessment/break_mode.py's `_line_evidence`
-    formats each entry as "{dbt_file_path}:{lineno}: {line}"). For an
-    ORIGIN_HARD_BREAK asset that path is always the project-relative .sql
-    file this CLI needs to patch, so recover it from the first evidence
-    entry that looks like one."""
-    for entry in asset.evidence:
-        candidate = entry.split(":", 1)[0]
-        if candidate.endswith(".sql"):
-            return candidate
-    return None
-
-
 async def _find_origin_asset(args: argparse.Namespace) -> AssetAssessment:
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
@@ -100,8 +85,8 @@ async def _find_origin_asset(args: argparse.Namespace) -> AssetAssessment:
         )
 
     origin = origin_assets[0]
-    if not _dbt_file_path_from_evidence(origin):
-        raise SystemExit(f"ORIGIN_HARD_BREAK asset '{origin.name}' has no recoverable dbt_file_path -- cannot generate a patch.")
+    if not origin.dbt_file_path:
+        raise SystemExit(f"ORIGIN_HARD_BREAK asset '{origin.name}' has no dbt_file_path -- cannot generate a patch.")
     return origin
 
 
@@ -131,7 +116,7 @@ def make_generate_fn(original_content: str, old_column: str, new_column: str, ll
 
 async def _run_codegen(args: argparse.Namespace) -> None:
     origin = await _find_origin_asset(args)
-    dbt_file_path = _dbt_file_path_from_evidence(origin)
+    dbt_file_path = origin.dbt_file_path
     print(f"ORIGIN_HARD_BREAK asset: {origin.name}  ({dbt_file_path})")
 
     temp_root = Path(tempfile.mkdtemp(prefix="blast-radius-codegen-"))
