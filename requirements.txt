@@ -10,6 +10,7 @@ python-dotenv
 rich
 faker
 acryl-datahub[postgres,dbt]==1.6.0.10
+mcp
 requests
 psycopg2-binary
 pytest
