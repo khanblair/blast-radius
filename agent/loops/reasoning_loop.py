@@ -71,6 +71,16 @@ class ReasoningLoop:
             "get_dataset_queries", {"urn": urn, "count": count}, rationale, lambda d: f"{d.get('total', 0)} queries on record"
         )
 
+    async def get_schema(self, urn: str, rationale: str, limit: int = 1000) -> dict:
+        """Loop 5 (watch mode): fetch a dataset's current schema fields via
+        the DataHub MCP server's `list_schema_fields` tool. `limit` is high
+        by default since watch mode needs the *complete* column list to
+        diff reliably -- a truncated fetch would look like spurious dropped
+        columns."""
+        return await self._call(
+            "list_schema_fields", {"urn": urn, "limit": limit}, rationale, lambda d: f"{d.get('totalFields', 0)} fields"
+        )
+
     def write_trace(self) -> Path:
         TRACES_DIR.mkdir(parents=True, exist_ok=True)
         path = TRACES_DIR / f"{self.run_id}.jsonl"

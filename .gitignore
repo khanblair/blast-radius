@@ -16,3 +16,7 @@ estate/dbt_project/.user.yml
 estate/seeds/data/*.csv
 
 traces/*.jsonl
+
+# watch mode run-state (schema snapshots + outcome log) -- demo-run
+# artifacts, not source
+watch_state/
