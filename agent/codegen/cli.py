@@ -63,7 +63,7 @@ def render_result(result: SelfCorrectionResult) -> str:
 async def _find_origin_asset(args: argparse.Namespace) -> AssetAssessment:
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
-        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform)
+        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform, schema=args.schema)
 
     assessment = await assess_change(
         changed_urn=changed_urn,
@@ -154,6 +154,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-attempts", dest="max_attempts", type=int, default=3)
 
     args = parser.parse_args(argv)
+    if args.max_attempts < 1:
+        parser.error(f"--max-attempts must be >= 1, got {args.max_attempts}")
     asyncio.run(_run_codegen(args))
 
 

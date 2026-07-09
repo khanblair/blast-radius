@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,19 @@ DATA_DIR = Path(__file__).parent / "data"
 ORDER_STATUSES = ["completed", "pending", "cancelled", "refunded"]
 PAYMENT_METHODS = ["credit_card", "paypal", "bank_transfer", "gift_card"]
 
+# Fixed, absolute bounds -- NOT relative strings like "-2y"/"-30d"/"now".
+# Faker resolves relative bounds against the real datetime.now() at call
+# time, which `fake.seed_instance(seed)` does not control: the exact window
+# a date is drawn from (and so the exact date drawn) shifted depending on
+# what day this script happened to run, despite SEED being fixed --
+# genuinely non-deterministic output from a script whose whole premise is
+# "seed=42 is deterministic." Fixed bounds make every run byte-identical
+# regardless of today's date.
+CUSTOMER_CREATED_START = datetime(2023, 1, 1)
+CUSTOMER_CREATED_END = datetime(2024, 12, 1)
+ORDER_DATE_START = datetime(2023, 1, 1)
+ORDER_DATE_END = datetime(2025, 1, 1)
+
 
 def generate_customers(n: int, seed: int) -> list[dict[str, Any]]:
     fake = Faker()
@@ -33,7 +47,9 @@ def generate_customers(n: int, seed: int) -> list[dict[str, Any]]:
                 "first_name": fake.first_name(),
                 "last_name": fake.last_name(),
                 "email": fake.unique.email(),
-                "created_at": fake.date_time_between(start_date="-2y", end_date="-30d").isoformat(sep=" "),
+                "created_at": fake.date_time_between(
+                    start_date=CUSTOMER_CREATED_START, end_date=CUSTOMER_CREATED_END
+                ).isoformat(sep=" "),
             }
         )
     return customers
@@ -50,7 +66,9 @@ def generate_orders(customers: list[dict[str, Any]], n: int, seed: int) -> list[
             {
                 "order_id": order_id,
                 "cust_id": customer["cust_id"],
-                "order_date": fake.date_time_between(start_date="-2y", end_date="now").isoformat(sep=" "),
+                "order_date": fake.date_time_between(
+                    start_date=ORDER_DATE_START, end_date=ORDER_DATE_END
+                ).isoformat(sep=" "),
                 "status": rng.choice(ORDER_STATUSES),
                 "amount": round(rng.uniform(15.0, 500.0), 2),
             }

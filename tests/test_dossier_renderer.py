@@ -328,6 +328,69 @@ def test_passed_and_needs_human_dossiers_have_different_headers():
     assert passed_header != needs_human_header
 
 
+def test_passed_with_zero_attempts_renders_as_needs_human_not_a_delivery():
+    # Defense-in-depth regression coverage: SelfCorrectionResult.final_status
+    # defaults to PASSED, so a result with zero recorded attempts (which
+    # run_self_correction itself now refuses to produce) must never render
+    # as a confident delivery banner if it reaches this renderer some other
+    # way -- that would be a false PASSED with nothing actually verified.
+    inconsistent_result = SelfCorrectionResult(
+        dbt_file_path="models/staging/stg_customers.sql",
+        attempts=[],
+        final_status=PASSED,
+        run_id="selfcorrect-inconsistent",
+    )
+
+    dossier = render_dossier(_assessment(), _narrative(), _decision(), inconsistent_result)
+
+    assert "STATUS: NEEDS_HUMAN" in dossier
+    assert "NOT A DELIVERY" in dossier
+    assert "Do NOT merge" in dossier
+    assert "READY FOR REVIEW" not in dossier
+
+
+# --- fail-honest multi-origin handling ---------------------------------------
+
+
+def test_unhandled_origin_names_forces_needs_human_even_when_self_correction_passed():
+    # Regression coverage: codegen/verification is single-file by design, so
+    # a change with more than one true origin only ever gets one of them
+    # patched. Reporting a confident PASSED for the whole change while a
+    # second origin's break sits unpatched would be a false trust signal --
+    # unhandled_origin_names must force NEEDS_HUMAN even when the one patch
+    # that DID run passed every verification level.
+    dossier = render_dossier(
+        _assessment(),
+        _narrative(),
+        _decision(),
+        _self_correction_passed_after_retry(),
+        unhandled_origin_names=["stg_other_customers"],
+    )
+
+    assert "STATUS: NEEDS_HUMAN" in dossier
+    assert "NOT A DELIVERY" in dossier
+    assert "stg_other_customers" in dossier
+    assert "Do NOT merge" in dossier
+    assert "READY FOR REVIEW" not in dossier
+
+
+def test_unhandled_origin_names_with_no_self_correction_still_names_them():
+    # A BREAKING decision can have multiple origins but codegen might still
+    # be skipped for other reasons -- the unhandled-origins banner must not
+    # assume self_correction is present.
+    dossier = render_dossier(
+        _assessment(),
+        _narrative(),
+        _decision(),
+        self_correction=None,
+        unhandled_origin_names=["stg_other_customers", "stg_yet_another"],
+    )
+
+    assert "STATUS: NEEDS_HUMAN" in dossier
+    assert "stg_other_customers" in dossier
+    assert "stg_yet_another" in dossier
+
+
 # --- no-codegen path (NO_MIGRATION_NEEDED / ADDITIVE) ------------------------
 
 
@@ -363,3 +426,20 @@ def test_deferred_breaking_dossier_does_not_claim_no_code_change_required():
     assert "NO CODE CHANGE REQUIRED" not in dossier
     assert "DEFERRED" in dossier
     assert "strategy C" in dossier
+
+
+def test_unrecognized_decision_type_does_not_fall_through_to_assessment_only():
+    # Defense-in-depth regression coverage: decision_type is a bare str, not
+    # a closed Enum (agent/decision/models.py). A future bug that produces
+    # an unrecognized value with self_correction=None must not silently
+    # read as "ASSESSMENT ONLY -- NO CODE CHANGE REQUIRED" -- that would be
+    # a false assurance that nothing needs attention.
+    garbage_decision = MigrationDecision(decision_type="SOMETHING_UNEXPECTED", rationale="...")
+
+    dossier = render_dossier(_assessment(), _narrative(), garbage_decision, self_correction=None)
+
+    assert "ASSESSMENT ONLY" not in dossier
+    assert "NO CODE CHANGE REQUIRED" not in dossier
+    assert "STATUS: UNKNOWN" in dossier
+    assert "SOMETHING_UNEXPECTED" in dossier
+    assert "do not assume" in dossier.lower()

@@ -242,6 +242,30 @@ def test_breaking_defer_takes_precedence_over_dashboard_exposure():
     assert decision.recommended_strategy == "C"
 
 
+def test_defer_rationale_is_not_self_contradictory_with_zero_hard_breaks():
+    # Regression coverage for a confirmed bug: the hop-depth defer condition
+    # can trip on its own with hard_break_count at 0 (an all-SILENT_CORRUPTION
+    # chain -- NOT_IMPACTED + select_star_exposure), and the old rationale
+    # text unconditionally said "0 hard break(s) ... exceed the bar for a
+    # same-day fix (> 5 hard breaks ...)", which is a false/self-contradictory
+    # claim (0 does not exceed 5). The text must not cite the hard-break
+    # count as the trigger when it wasn't.
+    silent_corruption_only = _asset(
+        compile_status=NOT_IMPACTED,
+        select_star_exposure=True,
+        hop=DEFER_DEEPEST_HOP_THRESHOLD,
+    )
+    result = _result([silent_corruption_only])
+    assert result.hard_break_count == 0  # sanity check on the fabricated scenario
+
+    decision = decide_migration(result, change_type=CHANGE_RENAME)
+
+    assert decision.recommended_strategy == "C"
+    assert "0 hard break(s) exceed" not in decision.rationale
+    for rejection in decision.rejected:
+        assert "touching all 0 hard breaks" not in rejection.reason
+
+
 def test_unaffected_deep_asset_does_not_inflate_defer_signal():
     # A deep but UNAFFECTED asset must not push the deepest-affected-hop
     # signal past the defer threshold -- only affected assets count.

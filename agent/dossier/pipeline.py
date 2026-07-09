@@ -60,9 +60,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ESTATE_DBT_PROJECT = REPO_ROOT / "estate" / "dbt_project"
 
 
-def find_origin_asset(assessment: AssessmentResult) -> AssetAssessment | None:
-    """Pure, unit-testable helper: the first ORIGIN_HARD_BREAK asset that
-    also has a usable dbt_file_path, or None when there isn't one.
+def find_origin_assets(assessment: AssessmentResult) -> list[AssetAssessment]:
+    """Pure, unit-testable helper: every ORIGIN_HARD_BREAK asset that also
+    has a usable dbt_file_path, in scan order -- plural, because a single
+    declared change can have more than one true origin (e.g. the same
+    column renamed on two different source tables that both feed the same
+    downstream chain). Returns an empty list when there isn't one.
 
     Deliberately never raises (unlike agent/codegen/cli.py's
     `_find_origin_asset`, which SystemExits when nothing is found) --
@@ -70,11 +73,15 @@ def find_origin_asset(assessment: AssessmentResult) -> AssetAssessment | None:
     instead of aborting, since NO_MIGRATION_NEEDED and ADDITIVE decisions
     (and even some BREAKING ones, e.g. a pure-postgres sibling with no local
     dbt model) routinely have no such asset at all.
+
+    `run_full_pipeline` only ever generates/verifies a patch for the FIRST
+    origin this returns -- codegen and the PR/dossier rendering it feeds are
+    single-file by design (see _run_codegen_and_verification). When more
+    than one origin comes back, the caller must not silently patch just the
+    first one and report a confident PASSED for the whole change; see the
+    fail-honest handling in run_full_pipeline below.
     """
-    for asset in assessment.affected:
-        if asset.compile_status == ORIGIN_HARD_BREAK and asset.dbt_file_path:
-            return asset
-    return None
+    return [asset for asset in assessment.affected if asset.compile_status == ORIGIN_HARD_BREAK and asset.dbt_file_path]
 
 
 def _resolve_llm_client() -> LLMClient | None:
@@ -98,7 +105,7 @@ async def _resolve_and_assess(
     assess_change itself opens/manages its own MCP calls internally."""
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
-        changed_urn = await resolve_dataset_urn(resolver_loop, table, platform)
+        changed_urn = await resolve_dataset_urn(resolver_loop, table, platform, schema=schema)
 
     return await assess_change(
         changed_urn=changed_urn,
@@ -130,29 +137,37 @@ def _run_codegen_and_verification(
     first attempt (the common case, and the live-verification case).
     """
     temp_root = Path(tempfile.mkdtemp(prefix="blast-radius-pipeline-"))
-    project_dir = temp_root / "dbt_project"
-    shutil.copytree(ESTATE_DBT_PROJECT, project_dir)
+    try:
+        project_dir = temp_root / "dbt_project"
+        shutil.copytree(ESTATE_DBT_PROJECT, project_dir)
 
-    dbt_file_path = origin.dbt_file_path
-    original_content = (project_dir / dbt_file_path).read_text()
-    llm_client = _resolve_llm_client()
+        dbt_file_path = origin.dbt_file_path
+        original_content = (project_dir / dbt_file_path).read_text()
+        llm_client = _resolve_llm_client()
 
-    def generate_fn(failure_evidence: str | None) -> str:
-        return generate_patch(
-            old_column=old_column,
-            new_column=new_column,
-            file_content=original_content,
-            failure_evidence=failure_evidence,
-            llm_client=llm_client,
+        def generate_fn(failure_evidence: str | None) -> str:
+            return generate_patch(
+                old_column=old_column,
+                new_column=new_column,
+                file_content=original_content,
+                failure_evidence=failure_evidence,
+                llm_client=llm_client,
+            )
+
+        result = run_self_correction(
+            dbt_file_path=dbt_file_path,
+            project_dir=str(project_dir),
+            generate_fn=generate_fn,
+            max_attempts=max_attempts,
         )
-
-    result = run_self_correction(
-        dbt_file_path=dbt_file_path,
-        project_dir=str(project_dir),
-        generate_fn=generate_fn,
-        max_attempts=max_attempts,
-    )
-    return result, original_content
+        return result, original_content
+    finally:
+        # mkdtemp's directory is never cleaned up by anything else -- every
+        # run_full_pipeline call was leaking one temp dbt project copy onto
+        # disk permanently. Nothing downstream of this function needs the
+        # temp copy to still exist (SelfCorrectionResult carries candidate
+        # content as strings, not file paths).
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 async def _write_dossier_to_datahub(
@@ -256,6 +271,12 @@ def run_full_pipeline(
       - "datahub_document_urn": str | None -- the saved document's URN on
             success; None if write_to_datahub was False, or if the write
             itself failed (see docstring above -- failures never raise)
+      - "unhandled_origin_names": list[str] -- names of ORIGIN_HARD_BREAK
+            assets found beyond the first one, which codegen never touched
+            (see find_origin_assets' docstring); empty unless there were
+            genuinely multiple origins. Non-empty forces the dossier to
+            NEEDS_HUMAN and skips PR delivery even if the one patch that DID
+            run passed verification -- see the fail-honest handling below.
     """
     assessment = asyncio.run(
         _resolve_and_assess(table, old_column, schema, platform, max_hops, max_tool_calls)
@@ -267,14 +288,26 @@ def run_full_pipeline(
     self_correction: SelfCorrectionResult | None = None
     original_content: str | None = None
     dbt_file_path: str | None = None
+    unhandled_origin_names: list[str] = []
 
     if decision.decision_type == BREAKING:
-        origin = find_origin_asset(assessment)
-        if origin is not None:
-            dbt_file_path = origin.dbt_file_path
+        origins = find_origin_assets(assessment)
+        if origins:
+            primary_origin = origins[0]
+            dbt_file_path = primary_origin.dbt_file_path
             self_correction, original_content = _run_codegen_and_verification(
-                origin, old_column, new_column, max_attempts
+                primary_origin, old_column, new_column, max_attempts
             )
+            if len(origins) > 1:
+                # Fail-honest: codegen/verification here is single-file by
+                # design (_run_codegen_and_verification patches exactly one
+                # dbt model). Patching just the first origin and reporting a
+                # confident PASSED for the whole change would leave every
+                # other origin's break silently unfixed -- see
+                # find_origin_assets' docstring. render_dossier is told
+                # about the rest so it renders NEEDS_HUMAN and names them,
+                # regardless of whether the one patch that DID run passed.
+                unhandled_origin_names = [asset.name for asset in origins[1:]]
 
     dossier_markdown = render_dossier(
         assessment=assessment,
@@ -282,13 +315,14 @@ def run_full_pipeline(
         decision=decision,
         self_correction=self_correction,
         original_content=original_content,
+        unhandled_origin_names=unhandled_origin_names or None,
     )
 
     pr_attempted = False
     pr_result = None
     branch_name = None
 
-    if self_correction is not None and self_correction.attempts:
+    if self_correction is not None and self_correction.attempts and not unhandled_origin_names:
         pr_attempted = True
         branch_name = f"blast-radius/{table}-{old_column}-to-{new_column}-{uuid.uuid4().hex[:6]}"
         patched_content = self_correction.attempts[-1].candidate_content
@@ -328,4 +362,5 @@ def run_full_pipeline(
         "branch_name": branch_name,
         "datahub_write_attempted": write_to_datahub,
         "datahub_document_urn": datahub_document_urn,
+        "unhandled_origin_names": unhandled_origin_names,
     }

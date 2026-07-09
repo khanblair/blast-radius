@@ -95,6 +95,13 @@ def run_self_correction(
     argument to the next generate_fn call. Traces every attempt (attempt
     number, verification outcome, pass/fail) to traces/<run_id>.jsonl.
     """
+    if max_attempts < 1:
+        # SelfCorrectionResult.final_status defaults to PASSED -- if the
+        # loop below never runs (empty range), that default would leak out
+        # unchanged, reporting a false PASSED with zero attempts instead of
+        # the caller's invalid input.
+        raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
+
     if verify_fn is None:
         # Lazy import: agent/verify/ is being built in parallel and may not
         # exist on disk yet when this module is imported/tested. Only
@@ -109,28 +116,35 @@ def run_self_correction(
     target_path = Path(project_dir) / dbt_file_path
     failure_evidence: str | None = None
 
-    for attempt_number in range(1, max_attempts + 1):
-        candidate_content = generate_fn(failure_evidence)
+    try:
+        for attempt_number in range(1, max_attempts + 1):
+            candidate_content = generate_fn(failure_evidence)
 
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(candidate_content)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(candidate_content)
 
-        verification = verify_fn(dbt_file_path, project_dir, verification_levels)
+            verification = verify_fn(dbt_file_path, project_dir, verification_levels)
 
-        result.attempts.append(
-            AttemptRecord(
-                attempt_number=attempt_number,
-                candidate_content=candidate_content,
-                verification=verification,
+            result.attempts.append(
+                AttemptRecord(
+                    attempt_number=attempt_number,
+                    candidate_content=candidate_content,
+                    verification=verification,
+                )
             )
-        )
 
-        if verification.passed:
-            result.final_status = PASSED
-            break
+            if verification.passed:
+                result.final_status = PASSED
+                break
 
-        result.final_status = NEEDS_HUMAN
-        failure_evidence = verification.first_failure.raw_error if verification.first_failure else None
+            result.final_status = NEEDS_HUMAN
+            failure_evidence = verification.first_failure.raw_error if verification.first_failure else None
+    finally:
+        # generate_fn/verify_fn can raise on a genuine infra problem (e.g.
+        # dbt not on PATH) rather than a verification failure -- that's a
+        # real error the caller must see (retrying won't fix a broken
+        # environment), but whatever attempts already ran must still be
+        # traced rather than lost, so the audit trail survives the crash.
+        result.write_trace()
 
-    result.write_trace()
     return result

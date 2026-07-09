@@ -168,6 +168,40 @@ def test_llm_output_that_is_only_whitespace_falls_back_to_template():
         assert line.strip() != ","
 
 
+def test_llm_output_that_is_only_a_trailing_comma_falls_back_to_template():
+    # Regression coverage for a confirmed bug: "," is not blank, so it used
+    # to pass the empty-core guard, then become empty AFTER the trailing-
+    # comma strip -- producing a malformed "    ," line that both V1_STATIC
+    # and V2_COMPILE verification incorrectly passed, silently deleting the
+    # target column. The comma-strip must happen before the emptiness check.
+    def comma_only_generate(system, user):
+        return ","
+
+    client = build_llm_client(provider="anthropic", generate_fn=comma_only_generate)
+    patched = generate_patch("cust_id", "customer_id", ORIGINAL_STG_CUSTOMERS, llm_client=client)
+
+    assert "customer_id as cust_id," in patched
+    for line in patched.splitlines():
+        assert line.strip() != ","
+
+
+def test_llm_multiline_output_falls_back_to_template_instead_of_injecting_extra_lines():
+    # Regression coverage for a confirmed bug: a hallucinated multi-line
+    # response (e.g. an extra injected column) used to be spliced into the
+    # file as multiple physical lines instead of being rejected, since
+    # nothing ever collapsed/validated the LLM's response was a single line.
+    def multiline_generate(system, user):
+        return "    customer_id as cust_id,\n    injected_extra_field,"
+
+    client = build_llm_client(provider="anthropic", generate_fn=multiline_generate)
+    patched = generate_patch("cust_id", "customer_id", ORIGINAL_STG_CUSTOMERS, llm_client=client)
+
+    assert "injected_extra_field" not in patched
+    assert "customer_id as cust_id," in patched
+    original_lines = ORIGINAL_STG_CUSTOMERS.splitlines()
+    assert len(patched.splitlines()) == len(original_lines)
+
+
 def test_llm_output_survives_markdown_fence_wrapping():
     def fenced_generate(system, user):
         return "```sql\n    customer_id as cust_id,\n```"

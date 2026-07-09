@@ -92,6 +92,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-attempts", dest="max_attempts", type=int, default=3)
 
     args = parser.parse_args(argv)
+    if args.max_attempts < 1:
+        parser.error(f"--max-attempts must be >= 1, got {args.max_attempts}")
 
     result = run_full_pipeline(
         args.table,

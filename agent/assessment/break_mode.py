@@ -32,6 +32,7 @@ from pathlib import Path
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from agent.assessment.models import CASCADE_HARD_BREAK, NOT_IMPACTED, ORIGIN_HARD_BREAK
 
@@ -88,22 +89,42 @@ def classify_compile_status(
     if dbt_file_path is None:
         return CASCADE_HARD_BREAK, ["no local SQL file for this asset -- classified as cascade by column-lineage membership"]
 
-    compiled_sql = read_compiled_sql(dbt_file_path)
-    if references_physical_table(compiled_sql, source_schema, source_table):
-        source_sql = read_source_sql(dbt_file_path)
-        pattern = re.compile(rf"\b{re.escape(column)}\b", re.IGNORECASE)
-        return ORIGIN_HARD_BREAK, _line_evidence(source_sql, pattern, dbt_file_path)
+    try:
+        compiled_sql = read_compiled_sql(dbt_file_path)
+        if references_physical_table(compiled_sql, source_schema, source_table):
+            source_sql = read_source_sql(dbt_file_path)
+            pattern = re.compile(rf"\b{re.escape(column)}\b", re.IGNORECASE)
+            return ORIGIN_HARD_BREAK, _line_evidence(source_sql, pattern, dbt_file_path)
 
-    return (
-        CASCADE_HARD_BREAK,
-        [f"{dbt_file_path}: does not read {source_schema}.{source_table} directly -- fails only because an upstream dependency does"],
-    )
+        return (
+            CASCADE_HARD_BREAK,
+            [f"{dbt_file_path}: does not read {source_schema}.{source_table} directly -- fails only because an upstream dependency does"],
+        )
+    except (OSError, SqlglotError) as e:
+        # A stale/mismatched dbt_file_path (DataHub's customProperties out
+        # of sync with what's actually on disk/compiled) or malformed SQL
+        # must not crash the whole assessment over one asset -- column-
+        # lineage already told us this asset IS affected, so degrade to the
+        # same conservative CASCADE_HARD_BREAK the "no local file" branch
+        # uses rather than guessing ORIGIN with unverifiable evidence.
+        return (
+            CASCADE_HARD_BREAK,
+            [f"{dbt_file_path}: could not read/parse SQL ({e}) -- classified as cascade, not origin, since this could not be structurally confirmed"],
+        )
 
 
 def classify_select_star_exposure(dbt_file_path: str | None) -> tuple[bool, list[str]]:
     if dbt_file_path is None:
         return False, []
-    aliases = find_star_aliases(read_compiled_sql(dbt_file_path))
+    try:
+        aliases = find_star_aliases(read_compiled_sql(dbt_file_path))
+    except (OSError, SqlglotError) as e:
+        # Same non-crashing degradation as classify_compile_status above --
+        # a missing/unparseable compiled file must not take down the whole
+        # assessment. Conservatively reports no exposure rather than
+        # guessing, but says so explicitly rather than silently claiming
+        # "confirmed safe."
+        return False, [f"{dbt_file_path}: could not read/parse SQL ({e}) -- select-star exposure could not be checked"]
     if not aliases:
         return False, []
 

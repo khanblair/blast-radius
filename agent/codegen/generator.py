@@ -89,15 +89,28 @@ def _normalize_line_style(core_text: str, current_line: str) -> str:
     normalizer instead of each independently trying to get formatting
     right, so this can never regress for either path again.
 
-    `core_text` must be non-empty (trimmed) -- callers must check for an
-    empty/garbage LLM response and fall back to the template *before*
-    calling this, since normalizing an empty string would silently produce
-    a syntactically-plausible-looking but empty `"    ,"` line."""
+    Raises `ValueError` -- which callers must treat as "unusable, fall back
+    to the template" -- in two cases a raw LLM response can hit that a naive
+    single not-empty check misses: (1) `core_text` is nothing but a trailing
+    comma (e.g. `","`), which survives an empty check *before* the comma is
+    stripped and only becomes empty *after*, silently producing a
+    syntactically-plausible-looking but empty `"    ,"` line that deletes the
+    target column; and (2) `core_text` spans more than one non-blank line
+    (e.g. a hallucinated extra column appended on a second line), which would
+    otherwise get spliced into the file as multiple physical lines instead
+    of the one line this transformation is allowed to touch."""
     core_text = core_text.strip()
-    if not core_text:
-        raise ValueError("core_text must be non-empty -- caller should have fallen back to the template")
+    non_blank_lines = [line for line in core_text.splitlines() if line.strip()]
+    if len(non_blank_lines) > 1:
+        raise ValueError(
+            f"core_text must resolve to a single line of SQL -- got {len(non_blank_lines)} "
+            "non-blank lines, which would inject extra content into the file"
+        )
+    core_text = non_blank_lines[0].strip() if non_blank_lines else ""
     if core_text.endswith(","):
         core_text = core_text[:-1].rstrip()
+    if not core_text:
+        raise ValueError("core_text must be non-empty -- caller should have fallen back to the template")
     indent = current_line[: len(current_line) - len(current_line.lstrip())]
     trailing_comma = "," if current_line.rstrip().endswith(",") else ""
     return f"{indent}{core_text}{trailing_comma}"

@@ -68,6 +68,19 @@ SAMPLE_QUERIES = [
     "SELECT order_id, customer_key, amount FROM fct_orders WHERE amount > 400",
     "SELECT customer_key, amount FROM fct_revenue WHERE amount > (SELECT AVG(amount) FROM fct_revenue)",
     "SELECT status, COUNT(*) FROM fct_orders GROUP BY status",
+    # Raw/staging queries -- without these, _target_table_for_query never had
+    # anything to route to raw_customers/stg_customers/etc, so every one of
+    # them showed usage_count=0 despite this module's own docstring claiming
+    # usage-based severity scoring gets "real signal" across the estate.
+    # stg_customers is the canonical demo's origin table, so it gets the
+    # most realistic usage of this group.
+    "SELECT cust_id, email FROM raw_customers WHERE email IS NOT NULL",
+    "SELECT COUNT(*) FROM stg_customers",
+    "SELECT cust_id, first_name, last_name FROM stg_customers WHERE first_name IS NOT NULL",
+    "SELECT order_id, status FROM raw_orders WHERE status = 'pending'",
+    "SELECT order_id, status FROM stg_orders WHERE status = 'pending'",
+    "SELECT payment_method, amount FROM raw_payments WHERE amount > 0",
+    "SELECT payment_method, COUNT(*) FROM stg_payments GROUP BY payment_method",
 ]
 
 
@@ -138,10 +151,14 @@ def build_description_mcps() -> list[MetadataChangeProposalWrapper]:
 
 
 def _target_table_for_query(statement: str) -> str:
-    if "fct_revenue" in statement:
-        return "fct_revenue"
-    if "dim_customers" in statement:
-        return "dim_customers"
+    # Checks every known table, not just the 3 marts -- the earlier version
+    # only special-cased fct_revenue/dim_customers and defaulted everything
+    # else to fct_orders, so a query mentioning a raw/staging table (e.g.
+    # `SELECT ... FROM stg_customers`) was silently misattributed to
+    # fct_orders instead of the table it actually queries.
+    for table in RAW_AND_STAGING_TABLES + MART_TABLES:
+        if table in statement:
+            return table
     return "fct_orders"
 
 
@@ -168,7 +185,21 @@ def build_query_mcps() -> list[MetadataChangeProposalWrapper]:
 
 def build_usage_statistics_mcps() -> list[MetadataChangeProposalWrapper]:
     mcps = []
-    usage_by_table = [("fct_revenue", 37, 4), ("fct_orders", 21, 3), ("dim_customers", 9, 2)]
+    usage_by_table = [
+        ("fct_revenue", 37, 4),
+        ("fct_orders", 21, 3),
+        ("dim_customers", 9, 2),
+        # Raw/staging usage -- previously absent entirely, so every one of
+        # these showed usage_count=0 (see build_query_mcps/SAMPLE_QUERIES
+        # above for the matching gap). stg_customers gets the highest count
+        # of this group since it's the canonical demo's origin table.
+        ("stg_customers", 12, 2),
+        ("raw_customers", 8, 2),
+        ("stg_orders", 6, 1),
+        ("raw_orders", 5, 1),
+        ("stg_payments", 4, 1),
+        ("raw_payments", 3, 1),
+    ]
     for table, total_queries, unique_users in usage_by_table:
         stats = DatasetUsageStatisticsClass(
             timestampMillis=0,

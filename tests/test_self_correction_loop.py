@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+import pytest
+
 from agent.loops import self_correction_loop as scl
 from agent.loops.self_correction_loop import run_self_correction
 
@@ -166,6 +168,73 @@ def test_max_attempts_is_configurable(tmp_path, monkeypatch):
 
     assert len(result.attempts) == 5
     assert result.final_status == "NEEDS_HUMAN"
+
+
+def test_max_attempts_zero_or_negative_raises_instead_of_false_passed(tmp_path, monkeypatch):
+    # Regression coverage for a confirmed bug: SelfCorrectionResult.final_status
+    # defaults to PASSED, and `for attempt_number in range(1, max_attempts+1)`
+    # is a no-op loop when max_attempts <= 0 -- the default would leak out
+    # unchanged, reporting a false PASSED with zero attempts. Invalid input
+    # must raise, not silently look like a passing run.
+    monkeypatch.setattr(scl, "TRACES_DIR", tmp_path)
+
+    def fake_generate(failure_evidence):
+        return "candidate sql"
+
+    def fake_verify(dbt_file_path, project_dir, levels):
+        return _passing_report()
+
+    for bad_value in (0, -1):
+        with pytest.raises(ValueError, match="max_attempts"):
+            run_self_correction(
+                dbt_file_path="models/staging/stg_customers.sql",
+                project_dir=str(tmp_path / "project"),
+                generate_fn=fake_generate,
+                verify_fn=fake_verify,
+                max_attempts=bad_value,
+            )
+
+
+# --- infra failure during an attempt ----------------------------------------
+
+
+def test_trace_is_written_even_when_verify_fn_raises(tmp_path, monkeypatch):
+    # Regression coverage: a genuine infra problem (e.g. dbt not on PATH)
+    # raised by verify_fn used to propagate straight out with no trace ever
+    # written, losing the audit trail for whatever attempts already ran.
+    # The exception must still propagate (retrying a broken environment
+    # won't help), but the trace must be written first.
+    monkeypatch.setattr(scl, "TRACES_DIR", tmp_path)
+
+    def fake_generate(failure_evidence):
+        return "candidate sql"
+
+    call_count = {"n": 0}
+
+    def fake_verify(dbt_file_path, project_dir, levels):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _failing_report("still broken")
+        raise RuntimeError("dbt: command not found")
+
+    with pytest.raises(RuntimeError, match="dbt: command not found"):
+        run_self_correction(
+            dbt_file_path="models/staging/stg_customers.sql",
+            project_dir=str(tmp_path / "project"),
+            generate_fn=fake_generate,
+            verify_fn=fake_verify,
+            max_attempts=3,
+        )
+
+    # The function raised before returning, so there's no result.run_id --
+    # discover the trace file by glob instead.
+    trace_files = list(tmp_path.glob("selfcorrect-*.jsonl"))
+    assert len(trace_files) == 1
+    lines = trace_files[0].read_text().strip().splitlines()
+    assert len(lines) == 1  # only the first (failing) attempt was recorded
+    record = json.loads(lines[0])
+    assert record["attempt_number"] == 1
+    assert record["passed"] is False
 
 
 # --- tracing -----------------------------------------------------------------

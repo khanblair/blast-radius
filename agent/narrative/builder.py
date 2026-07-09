@@ -114,8 +114,14 @@ def _build_one(
     if llm_client is not None:
         try:
             user_prompt = _fact_block(asset, changed_table, changed_column)
-            text = llm_client.generate(SYSTEM_PROMPT, user_prompt)
-            source = "llm"
+            generated = llm_client.generate(SYSTEM_PROMPT, user_prompt)
+            # An empty-string response is not None, so a bare `is None` check
+            # would ship narrative_text="" mislabeled source="llm" instead of
+            # falling back to the template below -- treat blank the same as
+            # a failed call.
+            if generated is not None and generated.strip():
+                text = generated
+                source = "llm"
         except Exception:
             # A runtime failure (rate limit, network, transient API error)
             # shouldn't lose the whole dossier over one asset -- fall back to

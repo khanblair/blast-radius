@@ -50,6 +50,27 @@ def test_target_table_for_query():
     assert _target_table_for_query("SELECT * FROM fct_orders") == "fct_orders"
 
 
+def test_target_table_for_query_routes_raw_and_staging_tables_too():
+    # Regression coverage for a confirmed gap: the routing used to only
+    # special-case the 3 mart tables and default everything else to
+    # fct_orders, so a query mentioning a raw/staging table was silently
+    # misattributed instead of routed to the table it actually queries.
+    assert _target_table_for_query("SELECT * FROM raw_customers") == "raw_customers"
+    assert _target_table_for_query("SELECT COUNT(*) FROM stg_customers") == "stg_customers"
+    assert _target_table_for_query("SELECT * FROM stg_orders WHERE status = 'pending'") == "stg_orders"
+    assert _target_table_for_query("SELECT * FROM stg_payments") == "stg_payments"
+
+
+def test_sample_queries_give_every_raw_and_staging_table_nonzero_usage():
+    # Regression coverage for the module's own docstring claim ("usage-based
+    # severity scoring has real signal instead of defaulting to zero") --
+    # every RAW_AND_STAGING_TABLES entry must be the target of at least one
+    # sample query, not just the 3 mart tables.
+    targeted = {_target_table_for_query(statement) for statement in SAMPLE_QUERIES}
+    for table in RAW_AND_STAGING_TABLES:
+        assert table in targeted, f"{table} has no sample query routed to it"
+
+
 def test_build_query_mcps_two_per_query():
     mcps = build_query_mcps()
     assert len(mcps) == 2 * len(SAMPLE_QUERIES)
@@ -60,6 +81,13 @@ def test_build_usage_statistics_targets_marts():
     urns = {mcp.entityUrn for mcp in mcps}
     assert dataset_urn("fct_revenue") in urns
     assert dataset_urn("fct_orders") in urns
+
+
+def test_build_usage_statistics_also_covers_every_raw_and_staging_table():
+    mcps = build_usage_statistics_mcps()
+    urns = {mcp.entityUrn for mcp in mcps}
+    for table in RAW_AND_STAGING_TABLES:
+        assert dataset_urn(table) in urns, f"{table} has no usage statistics"
 
 
 def test_build_all_mcps_is_the_union_of_builders():

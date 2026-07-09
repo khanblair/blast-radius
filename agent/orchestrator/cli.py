@@ -20,7 +20,7 @@ from agent.loops.reasoning_loop import ReasoningLoop
 from agent.orchestrator.mcp_client import datahub_mcp_session
 
 
-async def resolve_dataset_urn(loop: ReasoningLoop, table: str, platform: str) -> str:
+async def resolve_dataset_urn(loop: ReasoningLoop, table: str, platform: str, schema: str | None = None) -> str:
     # Deliberately checks urn.startswith(...) rather than entity.get("type") --
     # `search` result entities carry no "type"/"name"/"platform" field at all
     # (only "properties" and "urn"), unlike `get_lineage` result entities,
@@ -31,11 +31,38 @@ async def resolve_dataset_urn(loop: ReasoningLoop, table: str, platform: str) ->
     # == "DATASET"` checks are correct as written because they only ever
     # operate on get_lineage results, which do carry that field.
     result = await loop.search(table, rationale=f"resolve `{table}` to a dataset URN")
-    for r in result.get("searchResults", []):
-        urn = r["entity"].get("urn", "")
-        if urn.startswith("urn:li:dataset:") and f"urn:li:dataPlatform:{platform}" in urn:
-            return urn
-    raise SystemExit(f"Could not resolve a {platform} dataset URN for table '{table}'")
+    # Trace this resolution even though the loop is otherwise discarded by
+    # every current caller after this one search call -- without this, the
+    # resolver's reasoning (and, now, which candidate schema matched) was
+    # never written anywhere.
+    loop.write_trace()
+
+    platform_matches = [
+        r["entity"].get("urn", "")
+        for r in result.get("searchResults", [])
+        if r["entity"].get("urn", "").startswith("urn:li:dataset:")
+        and f"urn:li:dataPlatform:{platform}" in r["entity"].get("urn", "")
+    ]
+
+    if schema:
+        # The URN's qualified name embeds the schema (e.g.
+        # "warehouse.public.raw_customers") even though search result
+        # entities carry no separate "schema" field -- so a same-named table
+        # in a different schema can be told apart by matching that
+        # substring, without needing a second MCP call. Only narrows the
+        # candidate set when there's an actual schema-qualified match;
+        # otherwise falls through to the unfiltered platform matches so this
+        # stays backward compatible with URNs that don't embed a schema.
+        schema_qualified = [urn for urn in platform_matches if f".{schema}.{table}," in urn]
+        if schema_qualified:
+            platform_matches = schema_qualified
+
+    if platform_matches:
+        return platform_matches[0]
+    raise SystemExit(
+        f"Could not resolve a {platform} dataset URN for table '{table}'"
+        + (f" in schema '{schema}'" if schema else "")
+    )
 
 
 def render_summary(result) -> str:
@@ -61,7 +88,7 @@ def render_summary(result) -> str:
 async def _run_assess(args: argparse.Namespace) -> None:
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
-        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform)
+        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform, schema=args.schema)
 
     result = await assess_change(
         changed_urn=changed_urn,
@@ -95,7 +122,7 @@ async def _run_decide(args: argparse.Namespace) -> None:
     `--auto-approve` is passed)."""
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
-        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform)
+        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform, schema=args.schema)
 
     result = await assess_change(
         changed_urn=changed_urn,

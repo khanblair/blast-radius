@@ -8,6 +8,17 @@ engine: every branch is derived from `AssessmentResult` data (already
 computed by Phase 2's deterministic traversal) or the declared `change_type`,
 never guessed. Given the same inputs, `decide_migration` always returns the
 same `MigrationDecision`.
+
+Deliberate design boundary: `AssetAssessment.severity_score` (computed by
+agent/assessment/severity.py) is never read anywhere in this file. It drives
+ranking/display -- which asset the dossier's severity matrix and narrative
+list first, and which gets top billing -- but not the A/B/C strategy choice
+itself, which is decided purely on structural counts (hard_break_count,
+deepest_affected_hop, dashboard exposure) for determinism and explainability.
+Wiring severity into the thresholds below would risk changing which strategy
+gets recommended for the tuned canonical demo scenario and the committed
+examples/ -- a bigger, riskier change than the ranking/display role
+severity_score already plays honestly.
 """
 from __future__ import annotations
 
@@ -99,19 +110,52 @@ def _affected_deepest_hop(result: AssessmentResult) -> int:
 
 
 def _recommend_defer(result: AssessmentResult, deepest_affected_hop: int) -> tuple[str, str, list[RejectedStrategy]]:
+    # Which of the two independent conditions actually fired must drive the
+    # rationale text -- the hop-depth condition can trip on its own with
+    # hard_break_count at 0 (e.g. an all-SILENT_CORRUPTION chain), and a
+    # rationale that unconditionally cites "N hard break(s) ... exceed the
+    # bar" would read as self-contradictory when N is 0.
+    hard_break_trigger = result.hard_break_count > DEFER_HARD_BREAK_THRESHOLD
+    hop_trigger = deepest_affected_hop >= DEFER_DEEPEST_HOP_THRESHOLD
+
+    if hard_break_trigger and hop_trigger:
+        reason = (
+            f"{result.hard_break_count} hard break(s) (> {DEFER_HARD_BREAK_THRESHOLD}) across a lineage "
+            f"chain reaching affected hop {deepest_affected_hop} (>= {DEFER_DEEPEST_HOP_THRESHOLD}) both "
+            "exceed the bar for a same-day fix"
+        )
+    elif hard_break_trigger:
+        reason = (
+            f"{result.hard_break_count} hard break(s) exceed the bar for a same-day fix "
+            f"(> {DEFER_HARD_BREAK_THRESHOLD})"
+        )
+    else:
+        reason = (
+            f"the affected lineage chain reaches hop {deepest_affected_hop}, which exceeds the bar for "
+            f"a same-day fix (>= {DEFER_DEEPEST_HOP_THRESHOLD}) on its own -- {result.hard_break_count} hard "
+            f"break(s) and {result.silent_corruption_count} silent-corruption risk(s) are recorded, but it is "
+            "the chain's depth, not the hard-break count, driving this recommendation"
+        )
+
     rationale = (
-        f"{result.hard_break_count} hard break(s) across a lineage chain reaching affected hop "
-        f"{deepest_affected_hop} exceed the bar for a same-day fix "
-        f"(> {DEFER_HARD_BREAK_THRESHOLD} hard breaks or affected hop >= {DEFER_DEEPEST_HOP_THRESHOLD}) -- "
-        "recommend deferring to a deprecation cycle with owner sign-off rather than rushing "
+        f"{reason} -- recommend deferring to a deprecation cycle with owner sign-off rather than rushing "
         "a patch across this much surface area."
     )
-    rejected = [
-        RejectedStrategy(
-            "A",
+
+    if result.hard_break_count > 0:
+        direct_patch_rejection = (
             f"Direct patch rejected: would require touching all {result.hard_break_count} hard breaks "
-            "in a single PR -- too much simultaneous surface area to land safely.",
-        ),
+            "in a single PR -- too much simultaneous surface area to land safely."
+        )
+    else:
+        direct_patch_rejection = (
+            f"Direct patch rejected: the affected lineage chain reaches hop {deepest_affected_hop} with "
+            f"{result.silent_corruption_count} silent-corruption risk(s) recorded -- too deep and too easy "
+            "to miss a downstream consumer to patch safely in one pass, even with zero hard breaks."
+        )
+
+    rejected = [
+        RejectedStrategy("A", direct_patch_rejection),
         RejectedStrategy(
             "B",
             f"Bridge migration rejected: a bridge still requires patching every consumer eventually "

@@ -61,3 +61,26 @@ def test_dim_customers_has_no_select_star_exposure():
 def test_stg_customers_has_no_select_star_exposure():
     exposed, _ = classify_select_star_exposure("models/staging/stg_customers.sql")
     assert exposed is False
+
+
+# --- stale/missing compiled SQL must degrade, not crash ---------------------
+# Regression coverage for a confirmed gap: a dbt_file_path that DataHub says
+# exists (via customProperties) but has no matching compiled artifact on
+# disk (stale ingestion, renamed model, dbt never compiled for it) used to
+# raise FileNotFoundError straight out of classify_compile_status /
+# classify_select_star_exposure, crashing the *entire* assessment over one
+# asset instead of degrading just that asset's classification.
+
+
+def test_missing_compiled_sql_degrades_to_cascade_instead_of_crashing():
+    status, evidence = classify_compile_status(
+        True, "models/staging/does_not_exist.sql", "cust_id", SCHEMA, ROOT_TABLE
+    )
+    assert status == CASCADE_HARD_BREAK
+    assert any("could not read/parse" in e for e in evidence)
+
+
+def test_missing_compiled_sql_for_star_exposure_degrades_to_false_instead_of_crashing():
+    exposed, evidence = classify_select_star_exposure("models/staging/does_not_exist.sql")
+    assert exposed is False
+    assert any("could not read/parse" in e for e in evidence)

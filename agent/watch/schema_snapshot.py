@@ -34,19 +34,19 @@ async def capture_snapshot(loop: ReasoningLoop, table: str, schema: str, platfor
     and fetches its current schema fields via `ReasoningLoop.get_schema`,
     which wraps the DataHub MCP server's `list_schema_fields` tool.
 
-    `schema` is accepted for parity with declared mode's CLI surface (which
-    also threads a `--schema` flag through) but -- like declared mode's own
-    URN resolution -- is not used to narrow the search: DataHub dataset
-    search matches on bare table name, and `resolve_dataset_urn` filters the
-    results down by platform, not schema.
+    `schema` is passed through to `resolve_dataset_urn`, which uses it to
+    disambiguate same-named tables in different schemas (matched against the
+    resolved URN's qualified name) -- without it, a table name that exists
+    in more than one schema on this platform would resolve non-
+    deterministically to whichever match `search` happened to rank first.
     """
-    urn = await resolve_dataset_urn(loop, table, platform)
+    urn = await resolve_dataset_urn(loop, table, platform, schema=schema)
     result = await loop.get_schema(urn, rationale=f"capture current schema snapshot for `{table}`")
     columns = [
         {"name": field.get("fieldPath"), "type": field.get("nativeDataType")}
         for field in result.get("fields", [])
     ]
-    return SchemaSnapshot(table=table, columns=columns, captured_at=captured_at)
+    return SchemaSnapshot(table=table, schema=schema, platform=platform, columns=columns, captured_at=captured_at)
 
 
 def save_snapshot(snapshot: SchemaSnapshot, path: Path) -> None:
@@ -55,10 +55,18 @@ def save_snapshot(snapshot: SchemaSnapshot, path: Path) -> None:
 
 
 def load_snapshot(path: Path) -> SchemaSnapshot | None:
+    """Returns None both when there's no file yet AND when the file exists
+    but can't be loaded as a valid SchemaSnapshot (corrupted JSON, or an
+    older/incompatible format missing a field this version requires) --
+    either way there's no usable baseline, so this degrades to "first run"
+    behavior instead of crashing the whole watch cycle over one bad file."""
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
-    return SchemaSnapshot(**data)
+    try:
+        data = json.loads(path.read_text())
+        return SchemaSnapshot(**data)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def diff_snapshots(old: SchemaSnapshot, new: SchemaSnapshot) -> list[DetectedChange]:
@@ -76,6 +84,8 @@ def diff_snapshots(old: SchemaSnapshot, new: SchemaSnapshot) -> list[DetectedCha
         return [
             DetectedChange(
                 table=new.table,
+                schema=new.schema,
+                platform=new.platform,
                 change_type="possible_rename",
                 old_column=old_col,
                 new_column=new_col,
@@ -92,6 +102,8 @@ def diff_snapshots(old: SchemaSnapshot, new: SchemaSnapshot) -> list[DetectedCha
         changes.append(
             DetectedChange(
                 table=new.table,
+                schema=new.schema,
+                platform=new.platform,
                 change_type="drop_column",
                 old_column=col,
                 new_column=None,
@@ -102,6 +114,8 @@ def diff_snapshots(old: SchemaSnapshot, new: SchemaSnapshot) -> list[DetectedCha
         changes.append(
             DetectedChange(
                 table=new.table,
+                schema=new.schema,
+                platform=new.platform,
                 change_type="add_column",
                 old_column=None,
                 new_column=col,

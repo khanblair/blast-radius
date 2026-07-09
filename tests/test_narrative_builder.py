@@ -153,6 +153,26 @@ def test_llm_failure_falls_back_to_template_for_that_asset():
     assert "stg_customers.sql:4: cust_id," in narrative.narrative_text
 
 
+def test_llm_empty_string_response_falls_back_to_template_not_blank_llm_text():
+    # Regression coverage for a confirmed bug: an empty-string (not None) LLM
+    # response used to bypass the template fallback entirely (the guard was
+    # `if text is None`, and "" is not None), shipping narrative_text=""
+    # mislabeled source="llm" instead of falling back to the template.
+    asset = _asset(name="stg_customers", compile_status=ORIGIN_HARD_BREAK, evidence=["stg_customers.sql:4: cust_id,"])
+    result = AssessmentResult(changed_urn="urn:root", changed_column="cust_id", scanned=[asset], deepest_hop=1)
+
+    def blank_generate(system, user):
+        return ""
+
+    client = build_llm_client(provider="anthropic", generate_fn=blank_generate)
+    narrative_result = build_narratives(result, changed_table="raw_customers", llm_client=client)
+
+    narrative = narrative_result.narratives[0]
+    assert narrative.source == "template"
+    assert narrative.narrative_text  # non-empty
+    assert "stg_customers.sql:4: cust_id," in narrative.narrative_text
+
+
 # --- template fallback path (no LLM configured) -----------------------------
 
 

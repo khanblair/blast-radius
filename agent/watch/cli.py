@@ -33,8 +33,11 @@ from agent.watch.trigger import run_watch_cycle
 DEFAULT_SNAPSHOT_DIR = Path("watch_state")
 
 
-def _snapshot_path(snapshot_dir: Path, table: str) -> Path:
-    return snapshot_dir / f"{table}.json"
+def _snapshot_path(snapshot_dir: Path, table: str, schema: str, platform: str) -> Path:
+    # Keyed on platform+schema+table, not bare table name -- two same-named
+    # tables in different schemas/platforms must never share (and silently
+    # clobber) one snapshot file.
+    return snapshot_dir / f"{platform}-{schema}-{table}.json"
 
 
 def _default_outcome_log(snapshot_dir: Path) -> Path:
@@ -43,7 +46,7 @@ def _default_outcome_log(snapshot_dir: Path) -> Path:
 
 async def _run(args: argparse.Namespace) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    snapshot_path = _snapshot_path(args.snapshot_dir, args.table)
+    snapshot_path = _snapshot_path(args.snapshot_dir, args.table, args.schema, args.platform)
 
     previous = load_snapshot(snapshot_path)
     if previous is None:

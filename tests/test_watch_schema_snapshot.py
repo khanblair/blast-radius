@@ -65,6 +65,8 @@ def test_capture_snapshot_resolves_urn_and_maps_fields():
     snapshot = run(capture_snapshot(loop, "raw_customers", "public", "postgres", captured_at="2026-07-08T00:00:00+00:00"))
 
     assert snapshot.table == "raw_customers"
+    assert snapshot.schema == "public"
+    assert snapshot.platform == "postgres"
     assert snapshot.captured_at == "2026-07-08T00:00:00+00:00"
     assert snapshot.columns == [
         {"name": "cust_id", "type": "varchar"},
@@ -82,6 +84,8 @@ def test_capture_snapshot_resolves_urn_and_maps_fields():
 def test_save_and_load_snapshot_round_trip(tmp_path):
     snapshot = SchemaSnapshot(
         table="raw_customers",
+        schema="public",
+        platform="postgres",
         columns=[col("cust_id"), col("email")],
         captured_at="2026-07-08T00:00:00+00:00",
     )
@@ -94,7 +98,7 @@ def test_save_and_load_snapshot_round_trip(tmp_path):
 
 
 def test_save_snapshot_creates_parent_dirs(tmp_path):
-    snapshot = SchemaSnapshot(table="t", columns=[], captured_at="2026-07-08T00:00:00+00:00")
+    snapshot = SchemaSnapshot(table="t", schema="public", platform="postgres", columns=[], captured_at="2026-07-08T00:00:00+00:00")
     path = tmp_path / "nested" / "dir" / "t.json"
 
     save_snapshot(snapshot, path)
@@ -107,13 +111,36 @@ def test_load_snapshot_returns_none_for_missing_file(tmp_path):
     assert load_snapshot(tmp_path / "does_not_exist.json") is None
 
 
+def test_load_snapshot_returns_none_for_corrupted_json(tmp_path):
+    # Regression coverage for a confirmed gap: a truncated/corrupted
+    # snapshot file (e.g. from an interrupted write) used to crash
+    # json.loads straight out of load_snapshot instead of degrading to "no
+    # usable baseline."
+    path = tmp_path / "raw_customers.json"
+    path.write_text("{not valid json")
+
+    assert load_snapshot(path) is None
+
+
+def test_load_snapshot_returns_none_for_incompatible_old_format(tmp_path):
+    # A snapshot file written by an older version of this module (before
+    # schema/platform became required fields) is missing keys
+    # SchemaSnapshot(**data) now requires -- must degrade to "no usable
+    # baseline" (triggering a fresh first-run capture) rather than crash the
+    # whole watch cycle.
+    path = tmp_path / "raw_customers.json"
+    path.write_text(json.dumps({"table": "raw_customers", "columns": [], "captured_at": "2026-07-08T00:00:00+00:00"}))
+
+    assert load_snapshot(path) is None
+
+
 # ---------------------------------------------------------------------------
 # diff_snapshots
 # ---------------------------------------------------------------------------
 
 
-def snapshot(columns, table="raw_customers"):
-    return SchemaSnapshot(table=table, columns=columns, captured_at="2026-07-08T00:00:00+00:00")
+def snapshot(columns, table="raw_customers", schema="public", platform="postgres"):
+    return SchemaSnapshot(table=table, schema=schema, platform=platform, columns=columns, captured_at="2026-07-08T00:00:00+00:00")
 
 
 def test_diff_no_changes_returns_empty_list():
@@ -150,6 +177,20 @@ def test_diff_single_drop_column():
     assert change.old_column == "fax_number"
     assert change.new_column is None
     assert "fax_number" in change.evidence
+
+
+def test_diff_carries_schema_and_platform_from_the_new_snapshot_onto_detected_changes():
+    # Regression coverage: schema/platform must reach DetectedChange so
+    # run_watch_cycle can hand the correct ones to the pipeline instead of
+    # letting it silently fall back to run_full_pipeline's own defaults.
+    old = snapshot([col("cust_id")], schema="sales", platform="postgres")
+    new = snapshot([col("customer_id")], schema="sales", platform="postgres")
+
+    changes = diff_snapshots(old, new)
+
+    assert len(changes) == 1
+    assert changes[0].schema == "sales"
+    assert changes[0].platform == "postgres"
 
 
 def test_diff_single_possible_rename():

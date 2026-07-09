@@ -43,7 +43,7 @@ def render_narratives(narrative_result: NarrativeResult) -> str:
 async def _run_narrate(args: argparse.Namespace) -> None:
     async with datahub_mcp_session() as session:
         resolver_loop = ReasoningLoop(session=session, run_id="resolve")
-        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform)
+        changed_urn = await resolve_dataset_urn(resolver_loop, args.table, args.platform, schema=args.schema)
 
     result = await assess_change(
         changed_urn=changed_urn,

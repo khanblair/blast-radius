@@ -18,7 +18,7 @@ from __future__ import annotations
 import difflib
 
 from agent.assessment.models import AssessmentResult
-from agent.decision.models import AUTO_APPROVED, BREAKING, HUMAN_CONFIRMED, MigrationDecision
+from agent.decision.models import AUTO_APPROVED, BREAKING, HUMAN_CONFIRMED, KNOWN_DECISION_TYPES, MigrationDecision
 from agent.loops.self_correction_loop import PASSED, SelfCorrectionResult
 from agent.narrative.models import NarrativeResult
 
@@ -221,6 +221,7 @@ def render_dossier(
     decision: MigrationDecision,
     self_correction: SelfCorrectionResult | None = None,
     original_content: str | None = None,
+    unhandled_origin_names: list[str] | None = None,
 ) -> str:
     """Renders the full dossier as one markdown document.
 
@@ -240,6 +241,15 @@ def render_dossier(
     have it on hand (they read it off disk before calling run_self_correction,
     mirroring agent/codegen/cli.py's `_run_codegen`) pass it through here.
 
+    `unhandled_origin_names` names any ORIGIN_HARD_BREAK assets beyond the
+    one `self_correction` actually patched (see agent/dossier/pipeline.py's
+    `find_origin_assets` -- codegen is single-file by design, so a change
+    with more than one true origin only ever gets one of them patched).
+    When non-empty, this OVERRIDES the banner to NEEDS_HUMAN regardless of
+    `self_correction.final_status` -- a change with unpatched origins is
+    never a complete delivery, even if the one patch that did run passed
+    every verification level.
+
     The header prominently states final_status: PASSED dossiers read as a
     delivery ("ready"), NEEDS_HUMAN dossiers read as a distinct, visually
     different request for help ("stopped, needs a human") -- never the same
@@ -248,21 +258,61 @@ def render_dossier(
     """
     lines = [f"# Blast Radius Dossier -- {assessment.changed_urn} column `{assessment.changed_column}`", ""]
 
-    if self_correction is None and decision.decision_type == BREAKING:
+    if unhandled_origin_names:
+        lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")
+        lines.append(">")
+        handled_clause = (
+            f"A patch was generated for `{self_correction.dbt_file_path}` (see sections 4-5), but this "
+            if self_correction is not None
+            else "This "
+        )
+        lines.append(
+            f"> {handled_clause}change has more than one true origin. The following origin asset(s) were "
+            f"NOT patched and still need a fix by hand: {', '.join(unhandled_origin_names)}. "
+            "Do NOT merge the candidate below as the complete fix for this change."
+        )
+    elif self_correction is None and decision.decision_type == BREAKING:
         lines.append("> **STATUS: DEFERRED -- A FIX IS NEEDED, BUT NOT GENERATED YET**")
         lines.append(
             f"> Decision: BREAKING, strategy {decision.recommended_strategy} (see section 3). "
             "No codegen or verification was run -- see the rationale below before generating one."
         )
-    elif self_correction is None:
+    elif self_correction is None and decision.decision_type in KNOWN_DECISION_TYPES:
         lines.append("> **STATUS: ASSESSMENT ONLY -- NO CODE CHANGE REQUIRED**")
         lines.append(f"> Decision: {decision.decision_type}. No codegen or verification was run.")
-    elif self_correction.final_status == PASSED:
+    elif self_correction is None:
+        # Defense-in-depth: decision_type is a bare str, not a closed Enum
+        # (see agent/decision/models.py's KNOWN_DECISION_TYPES), so a future
+        # bug that produces an unrecognized value must not silently fall
+        # through to the "ASSESSMENT ONLY -- NO CODE CHANGE REQUIRED" banner
+        # above, which would falsely claim nothing needs attention.
+        lines.append("> ## STATUS: UNKNOWN -- **UNRECOGNIZED DECISION TYPE, DO NOT ASSUME SAFE**")
+        lines.append(">")
+        lines.append(
+            f"> decision_type={decision.decision_type!r} is not one of the known values "
+            f"({', '.join(sorted(KNOWN_DECISION_TYPES))}). This is not a recognized outcome -- "
+            "do not assume it means no action is needed; investigate the Decision Engine."
+        )
+    elif self_correction.final_status == PASSED and self_correction.attempts:
         lines.append("> ## STATUS: PASSED -- READY FOR REVIEW")
         lines.append(">")
         lines.append(
             f"> All verification levels passed after {len(self_correction.attempts)} attempt(s). "
             "The generated patch below is ready to deliver."
+        )
+    elif self_correction.final_status == PASSED:
+        # Defense-in-depth: SelfCorrectionResult.final_status defaults to
+        # PASSED, so a result with zero attempts (which run_self_correction
+        # itself now refuses to produce -- see agent/loops/
+        # self_correction_loop.py's max_attempts guard) must never render as
+        # a confident delivery banner if it somehow reaches this renderer
+        # from another caller.
+        lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")
+        lines.append(">")
+        lines.append(
+            "> Self-correction reported PASSED with zero recorded attempts -- this is "
+            "an inconsistent result, not a verified fix. Do NOT merge the candidate "
+            "below; a human needs to investigate why no attempt was recorded."
         )
     else:
         lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")

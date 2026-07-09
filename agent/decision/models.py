@@ -10,6 +10,13 @@ NO_MIGRATION_NEEDED = "NO_MIGRATION_NEEDED"
 ADDITIVE = "ADDITIVE"
 BREAKING = "BREAKING"
 
+# `decision_type` is a bare str, not a closed Enum -- callers that branch on
+# it (agent/dossier/renderer.py in particular) should check membership in
+# this set rather than assuming "not BREAKING" means one of the two known
+# non-breaking types, so an unrecognized future value can't silently fall
+# through to the wrong branch.
+KNOWN_DECISION_TYPES = frozenset({NO_MIGRATION_NEEDED, ADDITIVE, BREAKING})
+
 # Loop 4 gate #1 confirmation provenance. *How* a decision was confirmed
 # matters as much as *whether* it was -- a tool whose selling point is trust
 # must never claim a human signed off on something nobody was actually asked

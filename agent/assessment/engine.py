@@ -9,14 +9,25 @@ import uuid
 from agent.assessment.break_mode import classify_compile_status, classify_select_star_exposure
 from agent.assessment.models import AssessmentResult, AssetAssessment
 from agent.assessment.severity import rank
-from agent.loops.reasoning_loop import ReasoningLoop
+from agent.loops.reasoning_loop import ReasoningLoop, ToolCallBudgetExceeded
 from agent.orchestrator.mcp_client import datahub_mcp_session
 
 
 def bare_table_name(name: str) -> str:
     """DataHub dataset `name` is 'schema.table' for postgres-platform
     entities and just 'table' for dbt-platform entities -- normalize to the
-    bare table name so siblings merge into one logical asset."""
+    bare table name so siblings merge into one logical asset.
+
+    Known limitation, deliberately not fixed: this strips the schema
+    entirely, and `by_platform`/`hop_by_name`/`scanned` below are keyed on
+    the result across the WHOLE traversal -- two same-named tables in
+    different schemas would collide into one merged entry. Not fixed
+    because this demo estate has exactly one schema ("public") everywhere,
+    so the collision cannot occur here, and a proper fix (schema-qualified
+    keys throughout this function) touches this file's core data structures
+    broadly for a case that's currently unreachable -- a real risk to take
+    on deliberately for a multi-schema estate, not as a blind defensive
+    change against this one."""
     return name.rsplit(".", 1)[-1]
 
 
@@ -68,89 +79,105 @@ async def assess_change(
     max_tool_calls: int = 30,
 ) -> AssessmentResult:
     run_id = f"assess-{uuid.uuid4().hex[:8]}"
+    scanned: list[AssetAssessment] = []
+    hop_by_name: dict[str, int] = {}
 
     async with datahub_mcp_session() as session:
         loop = ReasoningLoop(session=session, run_id=run_id, max_hops=max_hops, max_tool_calls=max_tool_calls)
 
-        column_scoped = await loop.get_lineage(
-            changed_urn, rationale=f"scope exact impact of column `{changed_column}`", column=changed_column
-        )
-        broad = await loop.get_lineage(
-            changed_urn, rationale="broader dataset-level reachability, for confirmed-safe reporting and dashboard lookup"
-        )
-
-        column_results = column_scoped.get("downstreams", {}).get("searchResults", [])
-        broad_results = broad.get("downstreams", {}).get("searchResults", [])
-
-        in_column_scope = {bare_table_name(r["entity"].get("name") or "") for r in column_results if r["entity"].get("type") == "DATASET"}
-
-        by_platform: dict[str, dict[str, dict]] = {}
-        hop_by_name: dict[str, int] = {}
-        merge_siblings(column_results, by_platform, hop_by_name)
-        merge_siblings(broad_results, by_platform, hop_by_name)
-
-        root_name = bare_table_name(source_table)
-        by_platform.pop(root_name, None)
-
-        dashboard_urn = next(
-            (r["entity"]["urn"] for r in broad_results if r["entity"].get("type") == "DASHBOARD"), None
-        )
-        dashboard_upstream_names: set[str] = set()
-        if dashboard_urn:
-            dashboard_upstream = await loop.get_lineage(
-                dashboard_urn, rationale="determine which scanned assets actually feed a dashboard (exposure signal)", upstream=True
+        try:
+            column_scoped = await loop.get_lineage(
+                changed_urn, rationale=f"scope exact impact of column `{changed_column}`", column=changed_column
             )
-            dashboard_upstream_names = {
-                bare_table_name(r["entity"].get("name") or "")
-                for r in dashboard_upstream.get("upstreams", {}).get("searchResults", [])
-                if r["entity"].get("type") == "DATASET"
-            }
-
-        scanned: list[AssetAssessment] = []
-        for name, platforms in by_platform.items():
-            dbt_entity = platforms.get("dbt")
-            pg_entity = platforms.get("postgres")
-            # Ownership/usage were written by Phase 1 enrichment against
-            # postgres-platform URNs -- prefer that entity for those signals;
-            # dbt_file_path only ever exists on the dbt-platform entity.
-            enrichment_entity = pg_entity or dbt_entity or {}
-            file_path = dbt_file_path(dbt_entity) if dbt_entity else None
-
-            compile_status, compile_evidence = classify_compile_status(
-                name in in_column_scope, file_path, changed_column, source_schema, source_table
-            )
-            star_exposure, star_evidence = classify_select_star_exposure(file_path)
-            owners, has_business_owner = owner_urns_and_business_flag(enrichment_entity)
-
-            usage_urn = enrichment_entity.get("urn")
-            usage_data = await loop.get_dataset_queries(
-                usage_urn, rationale=f"usage volume for severity scoring of {name}", count=1
+            broad = await loop.get_lineage(
+                changed_urn, rationale="broader dataset-level reachability, for confirmed-safe reporting and dashboard lookup"
             )
 
-            scanned.append(
-                AssetAssessment(
-                    urn=usage_urn,
-                    name=name,
-                    compile_status=compile_status,
-                    select_star_exposure=star_exposure,
-                    evidence=compile_evidence + star_evidence,
-                    hop=hop_by_name.get(name),
-                    usage_count=usage_data.get("total", 0),
-                    is_dashboard_exposed=name in dashboard_upstream_names,
-                    owners=owners,
-                    has_business_owner=has_business_owner,
-                    dbt_file_path=file_path,
+            column_results = column_scoped.get("downstreams", {}).get("searchResults", [])
+            broad_results = broad.get("downstreams", {}).get("searchResults", [])
+
+            in_column_scope = {bare_table_name(r["entity"].get("name") or "") for r in column_results if r["entity"].get("type") == "DATASET"}
+
+            by_platform: dict[str, dict[str, dict]] = {}
+            merge_siblings(column_results, by_platform, hop_by_name)
+            merge_siblings(broad_results, by_platform, hop_by_name)
+
+            root_name = bare_table_name(source_table)
+            by_platform.pop(root_name, None)
+
+            # Every dashboard reachable from the changed asset, not just the
+            # first one found -- a table feeding two dashboards is exposure
+            # via either, and stopping at the first silently dropped the
+            # second dashboard's upstream set from dashboard_upstream_names.
+            dashboard_urns = [r["entity"]["urn"] for r in broad_results if r["entity"].get("type") == "DASHBOARD"]
+            dashboard_upstream_names: set[str] = set()
+            for dashboard_urn in dashboard_urns:
+                dashboard_upstream = await loop.get_lineage(
+                    dashboard_urn, rationale="determine which scanned assets actually feed a dashboard (exposure signal)", upstream=True
                 )
-            )
+                dashboard_upstream_names |= {
+                    bare_table_name(r["entity"].get("name") or "")
+                    for r in dashboard_upstream.get("upstreams", {}).get("searchResults", [])
+                    if r["entity"].get("type") == "DATASET"
+                }
+
+            for name, platforms in by_platform.items():
+                dbt_entity = platforms.get("dbt")
+                pg_entity = platforms.get("postgres")
+                # Ownership/usage were written by Phase 1 enrichment against
+                # postgres-platform URNs -- prefer that entity for those signals;
+                # dbt_file_path only ever exists on the dbt-platform entity.
+                enrichment_entity = pg_entity or dbt_entity or {}
+                file_path = dbt_file_path(dbt_entity) if dbt_entity else None
+
+                compile_status, compile_evidence = classify_compile_status(
+                    name in in_column_scope, file_path, changed_column, source_schema, source_table
+                )
+                star_exposure, star_evidence = classify_select_star_exposure(file_path)
+                owners, has_business_owner = owner_urns_and_business_flag(enrichment_entity)
+
+                usage_urn = enrichment_entity.get("urn")
+                usage_data = await loop.get_dataset_queries(
+                    usage_urn, rationale=f"usage volume for severity scoring of {name}", count=1
+                )
+
+                scanned.append(
+                    AssetAssessment(
+                        urn=usage_urn,
+                        name=name,
+                        compile_status=compile_status,
+                        select_star_exposure=star_exposure,
+                        evidence=compile_evidence + star_evidence,
+                        hop=hop_by_name.get(name),
+                        usage_count=usage_data.get("total", 0),
+                        is_dashboard_exposed=name in dashboard_upstream_names,
+                        owners=owners,
+                        has_business_owner=has_business_owner,
+                        dbt_file_path=file_path,
+                    )
+                )
+        except ToolCallBudgetExceeded:
+            # Loop 2's own discipline is "bounded reasoning, no unbounded
+            # wandering" -- running out of budget mid-traversal on a large
+            # estate is an expected outcome of that discipline, not a crash.
+            # Whatever was safely scanned before the budget ran out is
+            # still real signal; losing it entirely would be strictly worse
+            # than returning it, partial, and letting the trace show it
+            # stopped early (the trace only records calls that actually
+            # succeeded before the budget check tripped).
+            pass
+        finally:
+            # Must run even when ToolCallBudgetExceeded (above) or any
+            # other exception propagates -- otherwise a run that fails
+            # partway through leaves no trace at all of what it did do.
+            loop.write_trace()
 
         rank(scanned)
 
-        result = AssessmentResult(
+        return AssessmentResult(
             changed_urn=changed_urn,
             changed_column=changed_column,
             scanned=scanned,
             deepest_hop=max(hop_by_name.values(), default=0),
             mcp_call_trace=[entry.__dict__ for entry in loop.trace],
         )
-        loop.write_trace()
-        return result

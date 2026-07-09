@@ -5,9 +5,11 @@ from agent.watch.models import DetectedChange
 from agent.watch.trigger import run_watch_cycle
 
 
-def change(change_type, old_column, new_column, table="raw_customers"):
+def change(change_type, old_column, new_column, table="raw_customers", schema="public", platform="postgres"):
     return DetectedChange(
         table=table,
+        schema=schema,
+        platform=platform,
         change_type=change_type,
         old_column=old_column,
         new_column=new_column,
@@ -22,8 +24,8 @@ class RecordingPipeline:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, table, old_column, new_column, change_type):
-        self.calls.append((table, old_column, new_column, change_type))
+    def __call__(self, table, old_column, new_column, change_type, schema, platform):
+        self.calls.append((table, old_column, new_column, change_type, schema, platform))
         return {"table": table, "old_column": old_column, "new_column": new_column, "change_type": change_type}
 
 
@@ -33,7 +35,7 @@ def test_possible_rename_triggers_pipeline_with_correct_args():
 
     triggered = run_watch_cycle([rename], pipeline_fn=pipeline)
 
-    assert pipeline.calls == [("raw_customers", "cust_id", "customer_id", "possible_rename")]
+    assert pipeline.calls == [("raw_customers", "cust_id", "customer_id", "possible_rename", "public", "postgres")]
     assert len(triggered) == 1
     assert triggered[0]["change"] is rename
     assert triggered[0]["result"] == {
@@ -72,7 +74,7 @@ def test_mixed_changes_only_triggers_the_rename():
 
     triggered = run_watch_cycle([add, rename, drop], pipeline_fn=pipeline)
 
-    assert pipeline.calls == [("raw_customers", "cust_id", "customer_id", "possible_rename")]
+    assert pipeline.calls == [("raw_customers", "cust_id", "customer_id", "possible_rename", "public", "postgres")]
     assert len(triggered) == 1
     assert triggered[0]["change"] is rename
 
@@ -89,9 +91,13 @@ def test_empty_changes_list_with_injected_pipeline_returns_empty():
 def test_empty_changes_list_with_default_pipeline_never_imports_dossier():
     """The default pipeline_fn lazily imports agent.dossier.pipeline -- but
     only when it is actually called. With no actionable changes, it must
-    never be invoked, so this must succeed even though agent/dossier/pipeline.py
-    does not exist yet (Phase 7 is a parallel, separate build)."""
-    assert "agent.dossier.pipeline" not in sys.modules
+    never be invoked. Forces a clean sys.modules slate first: some other
+    test module elsewhere in the suite legitimately imports
+    agent.dossier.pipeline at collection time (e.g. to unit-test its pure
+    helpers), and Python's module cache is process-global, so this
+    assertion would otherwise depend on test execution order rather than on
+    what run_watch_cycle itself does."""
+    sys.modules.pop("agent.dossier.pipeline", None)
 
     triggered = run_watch_cycle([])
 
@@ -100,10 +106,13 @@ def test_empty_changes_list_with_default_pipeline_never_imports_dossier():
 
 
 def test_add_and_drop_only_changes_with_default_pipeline_never_imports_dossier():
+    # See test_empty_changes_list_with_default_pipeline_never_imports_dossier's
+    # docstring above: forces a clean sys.modules slate first for the same
+    # reason -- this assertion must not depend on test execution order.
+    sys.modules.pop("agent.dossier.pipeline", None)
+
     add = change("add_column", None, "signup_date")
     drop = change("drop_column", "fax_number", None)
-
-    assert "agent.dossier.pipeline" not in sys.modules
 
     triggered = run_watch_cycle([add, drop])
 
@@ -134,5 +143,5 @@ def test_default_pipeline_fn_never_auto_approves_or_creates_live_pr(monkeypatch)
     assert len(calls) == 1
     table, old_column, new_column, change_type, kwargs = calls[0]
     assert (table, old_column, new_column, change_type) == ("raw_customers", "cust_id", "customer_id", "possible_rename")
-    assert kwargs == {"auto_approve_decision": False, "create_pr_live": False}
+    assert kwargs == {"schema": "public", "platform": "postgres", "auto_approve_decision": False, "create_pr_live": False}
     assert triggered == [{"change": rename, "result": {"ok": True}}]

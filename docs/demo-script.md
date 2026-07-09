@@ -28,7 +28,7 @@ datahub ingest -c estate/ingestion_recipes/dbt_to_datahub.yml
 python -m agent.watch.cli --table raw_customers
 ```
 
-The watch CLI's second-ever run against this table (the first captured the pre-rename baseline — see `watch_state/raw_customers.json` from any earlier `--once` run) now diffs against a real, changed live schema and reports a `possible_rename` `DetectedChange` instead of "zero changes." **This is the only step in the whole system that mutates the shared Postgres/DataHub state — every other command below is either read-only against the live estate or writes to a disposable temp copy.**
+The watch CLI's second-ever run against this table (the first captured the pre-rename baseline — see `watch_state/postgres-public-raw_customers.json` from any earlier run) now diffs against a real, changed live schema and reports a `possible_rename` `DetectedChange` instead of "zero changes." **This is the only step in the whole system that mutates the shared Postgres/DataHub state — every other command below is either read-only against the live estate or writes to a disposable temp copy.**
 
 Reverting after recording: `ALTER TABLE raw_customers RENAME COLUMN customer_id TO cust_id;`, re-run both ingestion commands above, then re-run `dbt run --select stg_customers` — this restores every other example/demo command in this repo to its documented behavior.
 

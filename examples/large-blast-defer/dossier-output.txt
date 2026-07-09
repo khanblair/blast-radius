@@ -98,7 +98,7 @@ Evidence cited:
 
 ## 3. Migration Decision -- BREAKING
 
-7 hard break(s) across a lineage chain reaching affected hop 4 exceed the bar for a same-day fix (> 5 hard breaks or affected hop >= 4) -- recommend deferring to a deprecation cycle with owner sign-off rather than rushing a patch across this much surface area.
+7 hard break(s) (> 5) across a lineage chain reaching affected hop 4 (>= 4) both exceed the bar for a same-day fix -- recommend deferring to a deprecation cycle with owner sign-off rather than rushing a patch across this much surface area.
 
 ### Options
 - **A. Direct patch**
