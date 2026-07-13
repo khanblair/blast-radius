@@ -24,6 +24,7 @@ from agent.narrative.builder import build_narratives
 from agent.narrative.models import NarrativeResult
 from agent.orchestrator.cli import resolve_dataset_urn
 from agent.orchestrator.mcp_client import datahub_mcp_session
+from agent.paths import safe_output_path
 
 
 def render_narratives(narrative_result: NarrativeResult) -> str:
@@ -58,18 +59,18 @@ async def _run_narrate(args: argparse.Namespace) -> None:
 
     print(render_narratives(narrative_result))
     if args.json_out:
-        with open(args.json_out, "w") as f:
-            json.dump(
-                {
-                    "changed_urn": narrative_result.changed_urn,
-                    "changed_column": narrative_result.changed_column,
-                    "safe_summary": narrative_result.safe_summary,
-                    "narratives": [n.__dict__ for n in narrative_result.narratives],
-                },
-                f,
-                indent=2,
-            )
-        print(f"\nWrote narrative JSON to {args.json_out}")
+        json_out_path = safe_output_path(args.json_out)
+        json_text = json.dumps(
+            {
+                "changed_urn": narrative_result.changed_urn,
+                "changed_column": narrative_result.changed_column,
+                "safe_summary": narrative_result.safe_summary,
+                "narratives": [n.__dict__ for n in narrative_result.narratives],
+            },
+            indent=2,
+        )
+        await asyncio.to_thread(json_out_path.write_text, json_text)
+        print(f"\nWrote narrative JSON to {json_out_path}")
 
 
 def main(argv: list[str] | None = None) -> None:

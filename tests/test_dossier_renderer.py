@@ -25,20 +25,20 @@ from agent.verify.models import V1_STATIC, V2_COMPILE, VerificationOutcome, Veri
 
 
 def _asset(**overrides):
-    defaults = dict(
-        urn="urn:li:dataset:x",
-        name="x",
-        compile_status=ORIGIN_HARD_BREAK,
-        select_star_exposure=False,
-        evidence=[],
-        hop=1,
-        usage_count=0,
-        is_dashboard_exposed=False,
-        owners=[],
-        has_business_owner=False,
-        severity_score=0.0,
-        dbt_file_path=None,
-    )
+    defaults = {
+        "urn": "urn:li:dataset:x",
+        "name": "x",
+        "compile_status": ORIGIN_HARD_BREAK,
+        "select_star_exposure": False,
+        "evidence": [],
+        "hop": 1,
+        "usage_count": 0,
+        "is_dashboard_exposed": False,
+        "owners": [],
+        "has_business_owner": False,
+        "severity_score": 0.0,
+        "dbt_file_path": None,
+    }
     defaults.update(overrides)
     return AssetAssessment(**defaults)
 

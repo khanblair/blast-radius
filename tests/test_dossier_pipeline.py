@@ -16,13 +16,13 @@ from agent.dossier.pipeline import _run_codegen_and_verification, find_origin_as
 
 
 def _asset(**overrides):
-    defaults = dict(
-        urn="urn:li:dataset:x",
-        name="x",
-        compile_status=ORIGIN_HARD_BREAK,
-        select_star_exposure=False,
-        dbt_file_path="models/staging/stg_x.sql",
-    )
+    defaults = {
+        "urn": "urn:li:dataset:x",
+        "name": "x",
+        "compile_status": ORIGIN_HARD_BREAK,
+        "select_star_exposure": False,
+        "dbt_file_path": "models/staging/stg_x.sql",
+    }
     defaults.update(overrides)
     return AssetAssessment(**defaults)
 

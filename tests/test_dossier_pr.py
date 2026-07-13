@@ -223,7 +223,7 @@ def test_live_path_creates_branch_from_base_and_new_file_when_none_exists():
 
     create_file_calls = [c for c in fake_client.repo.calls if c[0] == "create_file"]
     assert len(create_file_calls) == 1
-    _, path, message, content, branch = create_file_calls[0]
+    _, path, _, content, branch = create_file_calls[0]
     assert path == DBT_FILE_PATH
     assert content == PATCHED_CONTENT
     assert branch == BRANCH_NAME
@@ -232,7 +232,7 @@ def test_live_path_creates_branch_from_base_and_new_file_when_none_exists():
 
     create_pull_calls = [c for c in fake_client.repo.calls if c[0] == "create_pull"]
     assert len(create_pull_calls) == 1
-    _, title, body, head, base = create_pull_calls[0]
+    _, _, body, head, base = create_pull_calls[0]
     assert body == DOSSIER_MARKDOWN
     assert head == BRANCH_NAME
     assert base == "main"
@@ -252,7 +252,7 @@ def test_live_path_updates_existing_file_with_its_sha():
 
     update_file_calls = [c for c in fake_client.repo.calls if c[0] == "update_file"]
     assert len(update_file_calls) == 1
-    _, path, message, content, sha, branch = update_file_calls[0]
+    _, path, _, content, sha, branch = update_file_calls[0]
     assert path == DBT_FILE_PATH
     assert content == PATCHED_CONTENT
     assert sha == "existing-sha-999"

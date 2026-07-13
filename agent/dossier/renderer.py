@@ -22,6 +22,8 @@ from agent.decision.models import AUTO_APPROVED, BREAKING, HUMAN_CONFIRMED, KNOW
 from agent.loops.self_correction_loop import PASSED, SelfCorrectionResult
 from agent.narrative.models import NarrativeResult
 
+_STATUS_NEEDS_HUMAN_HEADER = "> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**"
+
 
 def _render_impact_assessment(assessment: AssessmentResult) -> str:
     """Markdown rendering of the severity matrix -- same facts/ordering as
@@ -259,7 +261,7 @@ def render_dossier(
     lines = [f"# Blast Radius Dossier -- {assessment.changed_urn} column `{assessment.changed_column}`", ""]
 
     if unhandled_origin_names:
-        lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")
+        lines.append(_STATUS_NEEDS_HUMAN_HEADER)
         lines.append(">")
         handled_clause = (
             f"A patch was generated for `{self_correction.dbt_file_path}` (see sections 4-5), but this "
@@ -307,7 +309,7 @@ def render_dossier(
         # self_correction_loop.py's max_attempts guard) must never render as
         # a confident delivery banner if it somehow reaches this renderer
         # from another caller.
-        lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")
+        lines.append(_STATUS_NEEDS_HUMAN_HEADER)
         lines.append(">")
         lines.append(
             "> Self-correction reported PASSED with zero recorded attempts -- this is "
@@ -315,7 +317,7 @@ def render_dossier(
             "below; a human needs to investigate why no attempt was recorded."
         )
     else:
-        lines.append("> ## STATUS: NEEDS_HUMAN -- **NOT A DELIVERY, THIS IS A REQUEST FOR HELP**")
+        lines.append(_STATUS_NEEDS_HUMAN_HEADER)
         lines.append(">")
         lines.append(
             f"> Self-correction exhausted {len(self_correction.attempts)} attempt(s) without passing "

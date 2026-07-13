@@ -16,7 +16,12 @@ def record_outcome(entry: dict, log_path: Path) -> None:
     """Appends one JSON line to `log_path`, creating it and any parent
     directories if needed. `entry` should include at least a timestamp
     (supplied by the caller, not computed here) and enough of the detected
-    change + pipeline result to reconstruct what happened later."""
+    change + pipeline result to reconstruct what happened later.
+
+    Deliberately accepts any caller-supplied path with no root confinement
+    (see agent/watch/cli.py's --outcome-log) -- this is a shared utility,
+    not a trust boundary, and path validation belongs where the untrusted
+    CLI argument first enters, not re-derived here."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a") as f:
         f.write(json.dumps(entry) + "\n")

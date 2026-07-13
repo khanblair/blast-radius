@@ -29,19 +29,19 @@ def _clear_all_provider_keys(monkeypatch):
 
 
 def _asset(**overrides):
-    defaults = dict(
-        urn="urn:li:dataset:x",
-        name="x",
-        compile_status=ORIGIN_HARD_BREAK,
-        select_star_exposure=False,
-        evidence=[],
-        hop=1,
-        usage_count=0,
-        is_dashboard_exposed=False,
-        owners=[],
-        has_business_owner=False,
-        severity_score=0.0,
-    )
+    defaults = {
+        "urn": "urn:li:dataset:x",
+        "name": "x",
+        "compile_status": ORIGIN_HARD_BREAK,
+        "select_star_exposure": False,
+        "evidence": [],
+        "hop": 1,
+        "usage_count": 0,
+        "is_dashboard_exposed": False,
+        "owners": [],
+        "has_business_owner": False,
+        "severity_score": 0.0,
+    }
     defaults.update(overrides)
     return AssetAssessment(**defaults)
 

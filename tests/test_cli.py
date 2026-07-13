@@ -25,6 +25,7 @@ class FakeSession:
         self._search_results = search_results
 
     async def call_tool(self, name, arguments):
+        await asyncio.sleep(0)
         return FakeResult({"total": len(self._search_results), "searchResults": self._search_results})
 
 
@@ -48,8 +49,9 @@ def test_resolve_dataset_urn_picks_matching_platform_without_a_type_field(tmp_pa
 def test_resolve_dataset_urn_raises_when_no_match(tmp_path, monkeypatch):
     monkeypatch.setattr(rl, "TRACES_DIR", tmp_path)
     loop = ReasoningLoop(session=FakeSession([]), run_id="test")
+    coro = resolve_dataset_urn(loop, "nonexistent", "postgres")
     with pytest.raises(SystemExit):
-        run(resolve_dataset_urn(loop, "nonexistent", "postgres"))
+        run(coro)
 
 
 def test_resolve_dataset_urn_writes_a_trace(tmp_path, monkeypatch):

@@ -185,10 +185,11 @@ def test_max_attempts_zero_or_negative_raises_instead_of_false_passed(tmp_path, 
         return _passing_report()
 
     for bad_value in (0, -1):
+        project_dir = str(tmp_path / "project")
         with pytest.raises(ValueError, match="max_attempts"):
             run_self_correction(
                 dbt_file_path="models/staging/stg_customers.sql",
-                project_dir=str(tmp_path / "project"),
+                project_dir=project_dir,
                 generate_fn=fake_generate,
                 verify_fn=fake_verify,
                 max_attempts=bad_value,
@@ -217,10 +218,11 @@ def test_trace_is_written_even_when_verify_fn_raises(tmp_path, monkeypatch):
             return _failing_report("still broken")
         raise RuntimeError("dbt: command not found")
 
+    project_dir = str(tmp_path / "project")
     with pytest.raises(RuntimeError, match="dbt: command not found"):
         run_self_correction(
             dbt_file_path="models/staging/stg_customers.sql",
-            project_dir=str(tmp_path / "project"),
+            project_dir=project_dir,
             generate_fn=fake_generate,
             verify_fn=fake_verify,
             max_attempts=3,

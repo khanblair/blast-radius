@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.dossier.pipeline import run_full_pipeline
+from agent.paths import safe_output_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOSSIERS_DIR = REPO_ROOT / "dossiers"
@@ -132,6 +133,7 @@ def main(argv: list[str] | None = None) -> None:
             print("Dossier write to DataHub was attempted but did not succeed (see traces/ for details).")
 
     output_path = Path(args.output) if args.output else _default_output_path(args.table, args.old_column, args.new_column)
+    output_path = safe_output_path(output_path, root=REPO_ROOT)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(result["dossier_markdown"])
     print()

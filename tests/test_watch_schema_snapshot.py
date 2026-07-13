@@ -25,6 +25,7 @@ class FakeSession:
         self.calls = []
 
     async def call_tool(self, name, arguments):
+        await asyncio.sleep(0)
         self.calls.append((name, arguments))
         return FakeResult(self.responses[name])
 

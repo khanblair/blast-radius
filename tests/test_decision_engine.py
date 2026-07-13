@@ -12,22 +12,22 @@ from agent.decision.models import ADDITIVE, BREAKING, NO_MIGRATION_NEEDED
 
 
 def _asset(**overrides):
-    defaults = dict(
-        urn="urn:li:dataset:x",
-        name="x",
-        compile_status=ORIGIN_HARD_BREAK,
-        select_star_exposure=False,
-        hop=1,
-        usage_count=0,
-        is_dashboard_exposed=False,
-        has_business_owner=False,
-    )
+    defaults = {
+        "urn": "urn:li:dataset:x",
+        "name": "x",
+        "compile_status": ORIGIN_HARD_BREAK,
+        "select_star_exposure": False,
+        "hop": 1,
+        "usage_count": 0,
+        "is_dashboard_exposed": False,
+        "has_business_owner": False,
+    }
     defaults.update(overrides)
     return AssetAssessment(**defaults)
 
 
 def _result(assets, **overrides):
-    defaults = dict(changed_urn="urn:li:dataset:root", changed_column="cust_id")
+    defaults = {"changed_urn": "urn:li:dataset:root", "changed_column": "cust_id"}
     defaults.update(overrides)
     return AssessmentResult(scanned=assets, **defaults)
 

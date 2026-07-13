@@ -66,4 +66,4 @@ def test_generate_payments_skip_cancelled_and_reference_valid_orders():
     payment_order_ids = {p["order_id"] for p in payments}
 
     assert payment_order_ids <= valid_order_ids
-    assert len(payments) == len(set(p["payment_id"] for p in payments))
+    assert len(payments) == len({p["payment_id"] for p in payments})

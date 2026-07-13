@@ -1,17 +1,19 @@
+import pytest
+
 from agent.assessment.models import NOT_IMPACTED, ORIGIN_HARD_BREAK, AssetAssessment
 from agent.assessment.severity import rank, score
 
 
 def _asset(**overrides):
-    defaults = dict(
-        urn="urn:li:dataset:x",
-        name="x",
-        compile_status=ORIGIN_HARD_BREAK,
-        select_star_exposure=False,
-        usage_count=0,
-        is_dashboard_exposed=False,
-        has_business_owner=False,
-    )
+    defaults = {
+        "urn": "urn:li:dataset:x",
+        "name": "x",
+        "compile_status": ORIGIN_HARD_BREAK,
+        "select_star_exposure": False,
+        "usage_count": 0,
+        "is_dashboard_exposed": False,
+        "has_business_owner": False,
+    }
     defaults.update(overrides)
     return AssetAssessment(**defaults)
 
@@ -24,7 +26,7 @@ def test_hard_break_scores_higher_than_silent_corruption():
 
 def test_unaffected_scores_zero():
     unaffected = _asset(compile_status=NOT_IMPACTED, select_star_exposure=False)
-    assert score(unaffected) == 0.0
+    assert score(unaffected) == pytest.approx(0.0)
 
 
 def test_dashboard_exposure_increases_score():

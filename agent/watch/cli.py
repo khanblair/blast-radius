@@ -25,6 +25,7 @@ from pathlib import Path
 
 from agent.loops.reasoning_loop import ReasoningLoop
 from agent.orchestrator.mcp_client import datahub_mcp_session
+from agent.paths import safe_output_path
 from agent.watch.models import DetectedChange
 from agent.watch.outcome import record_outcome
 from agent.watch.schema_snapshot import capture_snapshot, diff_snapshots, load_snapshot, save_snapshot
@@ -108,6 +109,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.outcome_log is None:
         args.outcome_log = _default_outcome_log(args.snapshot_dir)
+    args.outcome_log = safe_output_path(args.outcome_log)
     asyncio.run(_run(args))
 
 

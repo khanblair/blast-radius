@@ -74,7 +74,10 @@ def test_auto_approve_confirms_recommended_strategy_without_prompting():
 def test_auto_approve_on_no_strategy_decision_is_not_applicable():
     decision = MigrationDecision(decision_type=ADDITIVE, rationale="non-breaking by construction")
 
-    confirmed = confirm_decision(decision, auto_approve=True, input_fn=lambda p: (_ for _ in ()).throw(AssertionError()))
+    def _should_not_be_called(prompt):
+        raise AssertionError("no-strategy decision must never call input_fn")
+
+    confirmed = confirm_decision(decision, auto_approve=True, input_fn=_should_not_be_called)
 
     assert confirmed.confirmation_mode == NOT_APPLICABLE
     assert confirmed.human_confirmed is False

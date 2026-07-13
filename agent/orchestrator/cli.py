@@ -18,6 +18,7 @@ from agent.decision.gate import confirm_decision, render_decision
 from agent.decision.models import AUTO_APPROVED
 from agent.loops.reasoning_loop import ReasoningLoop
 from agent.orchestrator.mcp_client import datahub_mcp_session
+from agent.paths import safe_output_path
 
 
 async def resolve_dataset_urn(loop: ReasoningLoop, table: str, platform: str, schema: str | None = None) -> str:
@@ -101,18 +102,18 @@ async def _run_assess(args: argparse.Namespace) -> None:
 
     print(render_summary(result))
     if args.json_out:
-        with open(args.json_out, "w") as f:
-            json.dump(
-                {
-                    "changed_urn": result.changed_urn,
-                    "changed_column": result.changed_column,
-                    "deepest_hop": result.deepest_hop,
-                    "scanned": [asset.__dict__ for asset in result.scanned],
-                },
-                f,
-                indent=2,
-            )
-        print(f"\nWrote assessment JSON to {args.json_out}")
+        json_out_path = safe_output_path(args.json_out)
+        json_text = json.dumps(
+            {
+                "changed_urn": result.changed_urn,
+                "changed_column": result.changed_column,
+                "deepest_hop": result.deepest_hop,
+                "scanned": [asset.__dict__ for asset in result.scanned],
+            },
+            indent=2,
+        )
+        await asyncio.to_thread(json_out_path.write_text, json_text)
+        print(f"\nWrote assessment JSON to {json_out_path}")
 
 
 async def _run_decide(args: argparse.Namespace) -> None:

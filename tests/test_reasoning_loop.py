@@ -23,6 +23,7 @@ class FakeSession:
         self.calls = []
 
     async def call_tool(self, name, arguments):
+        await asyncio.sleep(0)
         self.calls.append((name, arguments))
         return FakeResult(self.responses[name])
 
@@ -66,8 +67,9 @@ def test_tool_call_budget_enforced():
     loop = ReasoningLoop(session=session, run_id="test-run", max_tool_calls=2)
     run(loop.search("a", rationale="r1"))
     run(loop.search("b", rationale="r2"))
+    coro = loop.search("c", rationale="r3")
     with pytest.raises(ToolCallBudgetExceeded):
-        run(loop.search("c", rationale="r3"))
+        run(coro)
 
 
 def test_save_document_passes_type_title_content_and_related_assets():

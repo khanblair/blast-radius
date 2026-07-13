@@ -61,7 +61,7 @@ def generate_orders(customers: list[dict[str, Any]], n: int, seed: int) -> list[
     rng = random.Random(seed)
     orders = []
     for order_id in range(1, n + 1):
-        customer = rng.choice(customers)
+        customer = rng.choice(customers)  # NOSONAR: deterministic seed=42 fake data, not security-sensitive
         orders.append(
             {
                 "order_id": order_id,
@@ -69,7 +69,7 @@ def generate_orders(customers: list[dict[str, Any]], n: int, seed: int) -> list[
                 "order_date": fake.date_time_between(
                     start_date=ORDER_DATE_START, end_date=ORDER_DATE_END
                 ).isoformat(sep=" "),
-                "status": rng.choice(ORDER_STATUSES),
+                "status": rng.choice(ORDER_STATUSES),  # NOSONAR: deterministic seed=42 fake data, not security-sensitive
                 "amount": round(rng.uniform(15.0, 500.0), 2),
             }
         )
@@ -87,7 +87,7 @@ def generate_payments(orders: list[dict[str, Any]], seed: int) -> list[dict[str,
             {
                 "payment_id": payment_id,
                 "order_id": order["order_id"],
-                "payment_method": rng.choice(PAYMENT_METHODS),
+                "payment_method": rng.choice(PAYMENT_METHODS),  # NOSONAR: deterministic seed=42 fake data, not security-sensitive
                 "amount": order["amount"],
                 "payment_date": order["order_date"],
             }
